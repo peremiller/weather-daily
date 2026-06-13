@@ -45,7 +45,48 @@ export async function sendDaily(weather) {
   return { channel: 'telegram', results };
 }
 
-/** Send an arbitrary text to one chat (used by webhook command replies). */
+/** Send an arbitrary text to one chat (used by webhook/poll replies). */
 export async function sendText(chatId, text) {
   return call('sendMessage', { chat_id: chatId, text });
+}
+
+/** Remove any registered webhook so long polling can be used instead. */
+export async function deleteWebhook() {
+  try {
+    await call('deleteWebhook', { drop_pending_updates: false });
+  } catch {
+    /* ignore — nothing was set */
+  }
+}
+
+/**
+ * Long-poll Telegram for incoming messages and dispatch each to `handler`.
+ * Works without any public URL (the server pulls updates itself), so it's
+ * ideal for hosts like Railway where you haven't set up a webhook.
+ *
+ * `handler` is called as handler(chatId, text) for every text message.
+ * Runs forever; call once at startup. Does not block the caller.
+ */
+export async function startPolling(handler) {
+  await deleteWebhook(); // getUpdates fails if a webhook is active
+  console.log('[telegram] Long-polling for incoming messages…');
+  let offset = 0;
+  (async function loop() {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        const updates = await call('getUpdates', { offset, timeout: 30 });
+        for (const u of updates) {
+          offset = u.update_id + 1;
+          const msg = u.message || u.edited_message;
+          if (msg?.chat?.id) {
+            await handler(msg.chat.id, (msg.text || '').trim());
+          }
+        }
+      } catch (err) {
+        console.error('[telegram poll]', err.message);
+        await new Promise((r) => setTimeout(r, 3000)); // back off, then retry
+      }
+    }
+  })();
 }

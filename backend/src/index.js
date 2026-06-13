@@ -43,29 +43,41 @@ app.post('/broadcast', async (_req, res) => {
   }
 });
 
-// ---- Telegram webhook ------------------------------------------------------
-// Set with: https://api.telegram.org/bot<TOKEN>/setWebhook?url=<PUBLIC_URL>/webhook/telegram
-app.post('/webhook/telegram', async (req, res) => {
-  res.sendStatus(200); // ack immediately
-  const msg = req.body?.message;
-  if (!msg?.chat?.id) return;
-  const chatId = msg.chat.id;
-  const text = (msg.text || '').trim().toLowerCase();
+// ---- Telegram message handling ---------------------------------------------
+// Replies with the current weather to ANY incoming message. Used by both the
+// long-polling loop and the webhook below.
+export async function handleTelegramMessage(chatId, text) {
+  const cmd = (text || '').toLowerCase();
   try {
-    if (text === '/start' || text === '/subscribe') {
+    if (cmd === '/start' || cmd === '/help') {
       await telegram.sendText(
         chatId,
-        `Subscribed! Your chat id is ${chatId}. Add it to TELEGRAM_CHAT_IDS to receive the daily forecast. Send /now for the current weather.`
+        "👋 I'm your weather bot! I'll message you every morning at 7 AM — " +
+          'and you can get the current forecast anytime by sending me any message.'
       );
-    } else if (text === '/now' || text === '/weather') {
-      const weather = await getDailyWeather();
-      await telegram.sendText(chatId, formatMessage(weather, 'plain'));
-    } else {
-      await telegram.sendText(chatId, 'Commands: /now (current weather), /subscribe');
     }
+    // Always reply with the latest weather, whatever you send.
+    const weather = await getDailyWeather();
+    await telegram.sendText(chatId, formatMessage(weather, 'plain'));
   } catch (err) {
-    console.error('[telegram webhook]', err.message);
+    console.error('[telegram handler]', err.message);
+    try {
+      await telegram.sendText(
+        chatId,
+        "⚠️ Sorry, I couldn't fetch the weather right now. Please try again shortly."
+      );
+    } catch {
+      /* give up quietly */
+    }
   }
+}
+
+// Webhook alternative to polling (used only if you set a public webhook URL).
+app.post('/webhook/telegram', async (req, res) => {
+  res.sendStatus(200); // ack immediately
+  const msg = req.body?.message || req.body?.edited_message;
+  if (!msg?.chat?.id) return;
+  await handleTelegramMessage(msg.chat.id, (msg.text || '').trim());
 });
 
 // ---- Viber webhook ---------------------------------------------------------
@@ -137,4 +149,11 @@ app.listen(config.port, () => {
   console.log(`[server] Listening on http://localhost:${config.port}`);
   console.log(`[server] Enabled channels: ${enabledChannels().join(', ') || '(none — set tokens in .env)'}`);
   startScheduler();
+
+  // Reply to on-demand Telegram messages via long polling (no public URL needed).
+  if (config.telegram.enabled) {
+    telegram.startPolling(handleTelegramMessage).catch((err) =>
+      console.error('[telegram] Failed to start polling:', err.message)
+    );
+  }
 });
