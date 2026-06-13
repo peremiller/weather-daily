@@ -35,7 +35,7 @@ class WeatherCode {
       case 55:
       case 56:
       case 57:
-        return const WeatherCode('Drizzle', Icons.grain_rounded, _rainGrad);
+        return const WeatherCode('Drizzle', Icons.water_drop_rounded, _rainGrad);
       case 61:
       case 63:
       case 65:
@@ -44,7 +44,7 @@ class WeatherCode {
       case 80:
       case 81:
       case 82:
-        return const WeatherCode('Rain', Icons.grain_rounded, _rainGrad);
+        return const WeatherCode('Rain', Icons.cloudy_snowing, _rainGrad);
       case 71:
       case 73:
       case 75:
