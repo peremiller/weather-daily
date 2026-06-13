@@ -37,7 +37,14 @@ export const config = {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    // Who receives the owner statistics report. Defaults to the first chat id.
+    ownerChatId:
+      process.env.OWNER_CHAT_ID ||
+      (process.env.TELEGRAM_CHAT_IDS || '').split(',')[0].trim(),
   },
+
+  // When to send the owner's daily user report (cron, in TZ_NAME). Default 08:00.
+  ownerReportCron: process.env.OWNER_REPORT_CRON || '0 8 * * *',
 
   viber: {
     enabled: Boolean(process.env.VIBER_BOT_TOKEN),

@@ -91,9 +91,9 @@ export async function getForecast(loc, timezone = config.timezone) {
     timezone,
     temperature_unit: config.units.temperature,
     wind_speed_unit: config.units.wind,
-    // 2 days of hourly data so we can find the next rain start/stop even if
-    // it crosses midnight.
-    forecast_days: '2',
+    // 12 days: today + the next 11. Also gives plenty of hourly data to find
+    // the next rain start/stop even across midnight.
+    forecast_days: '12',
   });
   const res = await fetch(`${FORECAST_URL}?${params.toString()}`);
   if (!res.ok) throw new Error(`Forecast failed: ${res.status} ${res.statusText}`);
@@ -121,6 +121,27 @@ export async function getForecast(loc, timezone = config.timezone) {
       sunrise: d.sunrise[0],
       sunset: d.sunset[0],
     },
+    tomorrow: d.time.length > 1
+      ? {
+          code: d.weather_code[1],
+          tempMax: d.temperature_2m_max[1],
+          tempMin: d.temperature_2m_min[1],
+          precipProb: d.precipitation_probability_max[1],
+          sunrise: d.sunrise[1],
+          sunset: d.sunset[1],
+        }
+      : null,
+    // Upcoming days (tomorrow onward) for the multi-day list.
+    days: d.time.slice(1).map((date, idx) => {
+      const i = idx + 1;
+      return {
+        date,
+        code: d.weather_code[i],
+        tempMax: d.temperature_2m_max[i],
+        tempMin: d.temperature_2m_min[i],
+        precipProb: d.precipitation_probability_max[i],
+      };
+    }),
     rain: computeRainOutlook(data.hourly, cur.time),
   };
 }
@@ -223,6 +244,16 @@ const weekdayName = (dateStr) =>
     new Date(`${dateStr}T00:00:00Z`).getUTCDay()
   ];
 
+/** "2026-06-15" -> "Sun Jun 15". */
+function shortDate(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
+  const mo = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][
+    d.getUTCMonth()
+  ];
+  return `${wd} ${mo} ${d.getUTCDate()}`;
+}
+
 /** "" for today, "tomorrow " or "Friday " otherwise. */
 function dayPrefix(targetDate, nowDate) {
   if (targetDate === nowDate) return '';
@@ -259,6 +290,17 @@ export function formatMessage(w, format = 'plain') {
 
   const rl = rainLine(w.rain, w.now);
 
+  // Tomorrow's sun times.
+  const tomorrowSun = w.tomorrow
+    ? `🌄 Tomorrow: Sunrise ${timeOnly(w.tomorrow.sunrise)} · Sunset ${timeOnly(w.tomorrow.sunset)}`
+    : null;
+
+  // Multi-day list: the next 11 days (tomorrow onward).
+  const upcoming = (w.days || []).slice(0, 11).map((day) => {
+    const e = describeCode(day.code).emoji;
+    return `${shortDate(day.date)}  ${e} ${Math.round(day.tempMax)}°/${Math.round(day.tempMin)}° · 💧${day.precipProb ?? 0}%`;
+  });
+
   const lines = [
     `${cur.emoji} Weather for ${w.location.name}`,
     '',
@@ -269,7 +311,11 @@ export function formatMessage(w, format = 'plain') {
     ...(rl ? [rl] : []),
     `💧 Humidity: ${w.current.humidity}%`,
     `💨 Wind: up to ${Math.round(w.today.windMax)} ${wu}`,
-    `🌅 Sunrise ${timeOnly(w.today.sunrise)} · 🌇 Sunset ${timeOnly(w.today.sunset)}`,
+    `🌅 Today: Sunrise ${timeOnly(w.today.sunrise)} · Sunset ${timeOnly(w.today.sunset)}`,
+    ...(tomorrowSun ? [tomorrowSun] : []),
+    ...(upcoming.length
+      ? ['', `📅 Next ${upcoming.length} days:`, ...upcoming]
+      : []),
   ];
 
   let body = lines.join('\n');

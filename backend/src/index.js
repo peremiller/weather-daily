@@ -2,6 +2,7 @@ import express from 'express';
 import { config, enabledChannels } from './config.js';
 import { startScheduler } from './scheduler.js';
 import { broadcastDaily } from './broadcast.js';
+import { sendOwnerReport } from './ownerReport.js';
 import { getDailyWeather, getForecast, formatMessage, reverseGeocode } from './weather.js';
 import {
   addSubscriber,
@@ -57,25 +58,50 @@ const LOCATION_KEYBOARD = {
   },
 };
 
+// Subtle footer reminding users how to update their saved location.
+const CHANGE_LOCATION_HINT = '\n\nℹ️ Moved? Send /changelocation to update your location.';
+
 /** Fetch + send the forecast for a stored {name, latitude, longitude}. */
 async function sendForecastFor(chatId, loc) {
   // timezone 'auto' → sunrise/sunset etc. localised to the user's own area.
   const weather = await getForecast(loc, 'auto');
-  await telegram.sendText(chatId, formatMessage(weather, 'plain'), {
-    reply_markup: { remove_keyboard: true },
-  });
+  await telegram.sendText(
+    chatId,
+    formatMessage(weather, 'plain') + CHANGE_LOCATION_HINT,
+    { reply_markup: { remove_keyboard: true } }
+  );
+}
+
+/** Prompt the user to share a (new) location. */
+async function promptForLocation(chatId, intro) {
+  await telegram.sendText(chatId, intro, LOCATION_KEYBOARD);
 }
 
 // ---- Telegram message handling ---------------------------------------------
-// Gives each user the weather for THEIR location. First contact asks them to
-// share their location; after that, any message returns their local forecast.
-// Used by both the long-polling loop and the webhook below.
+// Gives each user the weather for THEIR location. We only ask for the location
+// once; afterwards any message returns their local forecast, and /changelocation
+// lets them update it. Used by both the long-polling loop and the webhook below.
 export async function handleTelegramMessage(msg) {
   const chatId = msg?.chat?.id;
   if (!chatId) return;
   const text = (msg.text || '').trim().toLowerCase();
 
   try {
+    // Owner-only: send the daily user report on demand.
+    if (text === '/report' && String(chatId) === String(config.telegram.ownerChatId)) {
+      await sendOwnerReport();
+      return;
+    }
+
+    // Let the user (re)share their location at any time.
+    if (text === '/changelocation' || text === '/change') {
+      await promptForLocation(
+        chatId,
+        '📍 Sure — tap the button below to share your new location.'
+      );
+      return;
+    }
+
     // 1) User tapped "share my location" (or sent a location pin).
     if (msg.location) {
       const { latitude, longitude } = msg.location;
@@ -93,13 +119,12 @@ export async function handleTelegramMessage(msg) {
       return;
     }
 
-    // 3) No location on file yet — ask for it.
-    await telegram.sendText(
+    // 3) No location on file yet — ask for it (this only happens once).
+    await promptForLocation(
       chatId,
-      "👋 I'm your weather bot! Tap the button below to share your location, " +
-        "and I'll send you the current forecast. After that, just message me " +
-        'anytime to get the weather for your area.',
-      LOCATION_KEYBOARD
+      "👋 I'm your weather bot! Tap the button below to share your location " +
+        "just once, and I'll send you the forecast. After that, message me " +
+        'anytime for your local weather — or /changelocation if you move.'
     );
   } catch (err) {
     console.error('[telegram handler]', err.message);

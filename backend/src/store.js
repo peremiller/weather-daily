@@ -70,3 +70,9 @@ export async function getUserLocation(userId) {
   const data = await load();
   return data.locations?.[String(userId)] || null;
 }
+
+/** All saved user locations, as a { chatId: location } map. */
+export async function getAllUserLocations() {
+  const data = await load();
+  return data.locations || {};
+}
