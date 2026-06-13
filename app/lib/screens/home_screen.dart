@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/weather.dart';
 import '../services/weather_service.dart';
 import '../services/location_service.dart';
+import 'privacy_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -219,6 +220,13 @@ class _HomeScreenState extends State<HomeScreen> {
           icon: const Icon(Icons.search, color: Colors.white),
           tooltip: 'Search city',
           onPressed: _openSearch,
+        ),
+        IconButton(
+          icon: const Icon(Icons.privacy_tip_outlined, color: Colors.white),
+          tooltip: 'Privacy',
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const PrivacyScreen()),
+          ),
         ),
       ],
     );
