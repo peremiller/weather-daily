@@ -56,3 +56,17 @@ export async function getSubscribers(channel) {
   const data = await load();
   return data[channel] || [];
 }
+
+/** Remember a user's shared location, keyed by their chat/user id. */
+export async function setUserLocation(userId, loc) {
+  const data = await load();
+  if (!data.locations) data.locations = {};
+  data.locations[String(userId)] = loc;
+  await persist();
+}
+
+/** Get a user's last shared location, or null if none. */
+export async function getUserLocation(userId) {
+  const data = await load();
+  return data.locations?.[String(userId)] || null;
+}

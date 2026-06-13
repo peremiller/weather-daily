@@ -45,9 +45,12 @@ export async function sendDaily(weather) {
   return { channel: 'telegram', results };
 }
 
-/** Send an arbitrary text to one chat (used by webhook/poll replies). */
-export async function sendText(chatId, text) {
-  return call('sendMessage', { chat_id: chatId, text });
+/**
+ * Send a text message to one chat. `extra` merges extra Bot API fields, e.g.
+ * a reply_markup keyboard for requesting the user's location.
+ */
+export async function sendText(chatId, text, extra = {}) {
+  return call('sendMessage', { chat_id: chatId, text, ...extra });
 }
 
 /** Remove any registered webhook so long polling can be used instead. */
@@ -80,7 +83,7 @@ export async function startPolling(handler) {
           offset = u.update_id + 1;
           const msg = u.message || u.edited_message;
           if (msg?.chat?.id) {
-            await handler(msg.chat.id, (msg.text || '').trim());
+            await handler(msg); // full message: text, location, etc.
           }
         }
       } catch (err) {

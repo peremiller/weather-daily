@@ -80,14 +80,14 @@ export async function resolveLocation() {
  * Fetch today's forecast for the given coordinates.
  * Returns a normalised object used by the message formatter.
  */
-export async function getForecast(loc) {
+export async function getForecast(loc, timezone = config.timezone) {
   const params = new URLSearchParams({
     latitude: String(loc.latitude),
     longitude: String(loc.longitude),
     current: 'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m',
     daily:
       'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,wind_speed_10m_max',
-    timezone: config.timezone,
+    timezone,
     temperature_unit: config.units.temperature,
     wind_speed_unit: config.units.wind,
     forecast_days: '1',
@@ -126,6 +126,36 @@ export async function getDailyWeather() {
   return getForecast(loc);
 }
 
+/**
+ * Reverse-geocode coordinates to a readable place name (best effort).
+ * Uses BigDataCloud's free, key-less reverse endpoint; falls back gracefully.
+ */
+export async function reverseGeocode(lat, lon) {
+  try {
+    const url =
+      `https://api.bigdatacloud.net/data/reverse-geocode-client` +
+      `?latitude=${lat}&longitude=${lon}&localityLanguage=en`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const d = await res.json();
+      const city = d.city || d.locality;
+      const parts = [];
+      if (city) parts.push(city);
+      // Add the region only if it differs from the city (avoids "Tokyo, Tokyo").
+      if (d.principalSubdivision && d.principalSubdivision !== city) {
+        parts.push(d.principalSubdivision);
+      }
+      // Fall back to the (verbose) country name only when nothing else exists.
+      if (parts.length === 0 && d.countryName) parts.push(d.countryName);
+      const name = parts.join(', ');
+      if (name) return name;
+    }
+  } catch {
+    /* fall through to default */
+  }
+  return 'your location';
+}
+
 const timeOnly = (iso) => {
   // Open-Meteo returns local ISO like "2026-06-13T05:30"
   const t = iso?.split('T')[1] || '';
@@ -143,7 +173,7 @@ export function formatMessage(w, format = 'plain') {
   const today = describeCode(w.today.code);
 
   const lines = [
-    `${cur.emoji} Good morning! Weather for ${w.location.name}`,
+    `${cur.emoji} Weather for ${w.location.name}`,
     '',
     `${cur.emoji} Now: ${Math.round(w.current.temp)}${t} (feels ${Math.round(w.current.feelsLike)}${t}) — ${cur.label}`,
     `${today.emoji} Today: ${today.label}`,

@@ -2,8 +2,13 @@ import express from 'express';
 import { config, enabledChannels } from './config.js';
 import { startScheduler } from './scheduler.js';
 import { broadcastDaily } from './broadcast.js';
-import { getDailyWeather, formatMessage } from './weather.js';
-import { addSubscriber, removeSubscriber } from './store.js';
+import { getDailyWeather, getForecast, formatMessage, reverseGeocode } from './weather.js';
+import {
+  addSubscriber,
+  removeSubscriber,
+  setUserLocation,
+  getUserLocation,
+} from './store.js';
 import * as telegram from './bots/telegram.js';
 import * as viber from './bots/viber.js';
 import * as messenger from './bots/messenger.js';
@@ -43,22 +48,59 @@ app.post('/broadcast', async (_req, res) => {
   }
 });
 
+// Keyboard with a one-tap "share my location" button.
+const LOCATION_KEYBOARD = {
+  reply_markup: {
+    keyboard: [[{ text: '📍 Share my location', request_location: true }]],
+    resize_keyboard: true,
+    one_time_keyboard: true,
+  },
+};
+
+/** Fetch + send the forecast for a stored {name, latitude, longitude}. */
+async function sendForecastFor(chatId, loc) {
+  // timezone 'auto' → sunrise/sunset etc. localised to the user's own area.
+  const weather = await getForecast(loc, 'auto');
+  await telegram.sendText(chatId, formatMessage(weather, 'plain'), {
+    reply_markup: { remove_keyboard: true },
+  });
+}
+
 // ---- Telegram message handling ---------------------------------------------
-// Replies with the current weather to ANY incoming message. Used by both the
-// long-polling loop and the webhook below.
-export async function handleTelegramMessage(chatId, text) {
-  const cmd = (text || '').toLowerCase();
+// Gives each user the weather for THEIR location. First contact asks them to
+// share their location; after that, any message returns their local forecast.
+// Used by both the long-polling loop and the webhook below.
+export async function handleTelegramMessage(msg) {
+  const chatId = msg?.chat?.id;
+  if (!chatId) return;
+  const text = (msg.text || '').trim().toLowerCase();
+
   try {
-    if (cmd === '/start' || cmd === '/help') {
-      await telegram.sendText(
-        chatId,
-        "👋 I'm your weather bot! I'll message you every morning at 7 AM — " +
-          'and you can get the current forecast anytime by sending me any message.'
-      );
+    // 1) User tapped "share my location" (or sent a location pin).
+    if (msg.location) {
+      const { latitude, longitude } = msg.location;
+      const name = await reverseGeocode(latitude, longitude);
+      const loc = { name, latitude, longitude };
+      await setUserLocation(chatId, loc);
+      await sendForecastFor(chatId, loc);
+      return;
     }
-    // Always reply with the latest weather, whatever you send.
-    const weather = await getDailyWeather();
-    await telegram.sendText(chatId, formatMessage(weather, 'plain'));
+
+    // 2) Any other message — use their saved location if we have one.
+    const saved = await getUserLocation(chatId);
+    if (saved) {
+      await sendForecastFor(chatId, saved);
+      return;
+    }
+
+    // 3) No location on file yet — ask for it.
+    await telegram.sendText(
+      chatId,
+      "👋 I'm your weather bot! Tap the button below to share your location, " +
+        "and I'll send you the current forecast. After that, just message me " +
+        'anytime to get the weather for your area.',
+      LOCATION_KEYBOARD
+    );
   } catch (err) {
     console.error('[telegram handler]', err.message);
     try {
@@ -77,7 +119,7 @@ app.post('/webhook/telegram', async (req, res) => {
   res.sendStatus(200); // ack immediately
   const msg = req.body?.message || req.body?.edited_message;
   if (!msg?.chat?.id) return;
-  await handleTelegramMessage(msg.chat.id, (msg.text || '').trim());
+  await handleTelegramMessage(msg);
 });
 
 // ---- Viber webhook ---------------------------------------------------------
