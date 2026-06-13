@@ -158,6 +158,7 @@ export async function getForecast(loc, timezone = config.timezone) {
         tempMax: d.temperature_2m_max[i],
         tempMin: d.temperature_2m_min[i],
         precipProb: d.precipitation_probability_max[i],
+        rainSlots: rainSlotsForDate(data.hourly, date),
       };
     }),
     rain: computeRainOutlook(data.hourly, cur.time),
@@ -166,6 +167,49 @@ export async function getForecast(loc, timezone = config.timezone) {
 
 // A measurable-rain threshold in mm/h. Below this we treat the hour as dry.
 const RAIN_THRESHOLD_MM = 0.1;
+
+/** Compact slot label from two 0–23 hours, e.g. (13,15) -> "1–3PM". */
+function slotLabel(s, e) {
+  if (e <= s) e = s + 1;
+  const f = (h) => {
+    const ap = h % 24 < 12 ? 'AM' : 'PM';
+    let d = h % 12;
+    if (d === 0) d = 12;
+    return { d, ap };
+  };
+  const a = f(s);
+  const b = f(e);
+  return a.ap === b.ap ? `${a.d}–${b.d}${b.ap}` : `${a.d}${a.ap}–${b.d}${b.ap}`;
+}
+
+/**
+ * Contiguous rain windows within one local date, as compact labels.
+ * Open-Meteo hourly precipitation is a preceding-hour sum, so a wet hour H
+ * means rain during [H-1, H]; windows are offset accordingly.
+ */
+function rainSlotsForDate(hourly, dateStr, maxSlots = 3) {
+  if (!hourly?.time || !hourly?.precipitation) return [];
+  const times = hourly.time;
+  const precip = hourly.precipitation;
+  const slots = [];
+  let startH = null;
+  let prevH = null;
+  for (let i = 0; i < times.length; i++) {
+    const [d, t] = times[i].split('T');
+    if (d !== dateStr) continue;
+    const hour = parseInt(t.slice(0, 2), 10);
+    const wet = (precip[i] ?? 0) >= RAIN_THRESHOLD_MM;
+    if (wet) {
+      if (startH === null) startH = hour;
+      prevH = hour;
+    } else if (startH !== null) {
+      slots.push([Math.max(0, startH - 1), prevH]);
+      startH = null;
+    }
+  }
+  if (startH !== null) slots.push([Math.max(0, startH - 1), prevH]);
+  return slots.slice(0, maxSlots).map(([s, e]) => slotLabel(s, e));
+}
 
 /**
  * From hourly precipitation, work out whether it's raining now and when that
@@ -317,7 +361,11 @@ export function formatMessage(w, format = 'plain') {
   const nextDays = (w.days || []).slice(0, 12);
   const upcoming = nextDays.map((day) => {
     const e = dailyEmoji(day.code, day.precipProb);
-    return `${shortDate(day.date)}  ${e} ${Math.round(day.tempMax)}°/${Math.round(day.tempMin)}° · 💧${day.precipProb ?? 0}%`;
+    let line = `${shortDate(day.date)}  ${e} ${Math.round(day.tempMax)}°/${Math.round(day.tempMin)}° · 💧${day.precipProb ?? 0}%`;
+    if (day.rainSlots && day.rainSlots.length) {
+      line += `\n      ☔ rain ${day.rainSlots.join(', ')}`;
+    }
+    return line;
   });
 
   // Top 3 driest days (lowest rain chance) over the forecast window, ranked.

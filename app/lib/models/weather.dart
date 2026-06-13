@@ -69,6 +69,7 @@ class DailyForecast {
   final double tempMax;
   final double tempMin;
   final int precipProbability;
+  final List<String> rainSlots; // e.g. ["1–3PM", "8–11PM"]
 
   DailyForecast({
     required this.date,
@@ -76,9 +77,52 @@ class DailyForecast {
     required this.tempMax,
     required this.tempMin,
     required this.precipProbability,
+    this.rainSlots = const [],
   });
 
   WeatherCode get weather => WeatherCode.from(code);
+
+  /// Compact label from two 0–23 hours, e.g. (13,15) -> "1–3PM".
+  static String _slotLabel(int s, int e) {
+    if (e <= s) e = s + 1;
+    String ap(int h) => h % 24 < 12 ? 'AM' : 'PM';
+    int disp(int h) {
+      final d = h % 12;
+      return d == 0 ? 12 : d;
+    }
+    return ap(s) == ap(e)
+        ? '${disp(s)}–${disp(e)}${ap(e)}'
+        : '${disp(s)}${ap(s)}–${disp(e)}${ap(e)}';
+  }
+
+  /// Contiguous rain windows within one local date (preceding-hour offset).
+  static List<String> rainSlotsForDate(
+      Map<String, dynamic>? hourly, String dateStr,
+      {int maxSlots = 3}) {
+    if (hourly == null) return const [];
+    final times = (hourly['time'] as List?)?.cast<String>();
+    final precip = hourly['precipitation'] as List?;
+    if (times == null || precip == null) return const [];
+    const threshold = 0.1;
+    final slots = <List<int>>[];
+    int? startH;
+    int prevH = 0;
+    for (var i = 0; i < times.length; i++) {
+      final parts = times[i].split('T');
+      if (parts[0] != dateStr) continue;
+      final hour = int.parse(parts[1].substring(0, 2));
+      final wet = ((precip[i] ?? 0) as num) >= threshold;
+      if (wet) {
+        startH ??= hour;
+        prevH = hour;
+      } else if (startH != null) {
+        slots.add([startH - 1 < 0 ? 0 : startH - 1, prevH]);
+        startH = null;
+      }
+    }
+    if (startH != null) slots.add([startH - 1 < 0 ? 0 : startH - 1, prevH]);
+    return slots.take(maxSlots).map((s) => _slotLabel(s[0], s[1])).toList();
+  }
 
   /// An icon consistent with the rain probability, so a sunny icon never shows
   /// on a high-rain day. Snow/thunderstorm keep their own icon.
@@ -151,6 +195,7 @@ class Weather {
   ) {
     final current = json['current'] as Map<String, dynamic>;
     final daily = json['daily'] as Map<String, dynamic>;
+    final hourly = json['hourly'] as Map<String, dynamic>?;
 
     DateTime parse(String s) => DateTime.parse(s);
 
@@ -168,6 +213,8 @@ class Weather {
         tempMax: maxes[i].toDouble(),
         tempMin: mins[i].toDouble(),
         precipProbability: (precs[i] ?? 0).toInt(),
+        // times[i] is the date-only string ("2026-06-15").
+        rainSlots: DailyForecast.rainSlotsForDate(hourly, times[i]),
       ));
     }
 

@@ -322,41 +322,65 @@ class _HomeScreenState extends State<HomeScreen> {
           for (var i = 0; i < w.daily.length; i++) ...[
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(
-                    width: 64,
-                    child: Text(
-                      _dayLabel(i, w.daily[i].date),
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14),
-                    ),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 64,
+                        child: Text(
+                          _dayLabel(i, w.daily[i].date),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 14),
+                        ),
+                      ),
+                      Icon(w.daily[i].displayIcon,
+                          color: Colors.white, size: 22),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            const Icon(Icons.umbrella,
+                                color: Colors.white54, size: 13),
+                            const SizedBox(width: 2),
+                            Text('${w.daily[i].precipProbability}%',
+                                style: const TextStyle(
+                                    color: Colors.white70, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      Text('${w.daily[i].tempMax.round()}°',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15)),
+                      const SizedBox(width: 8),
+                      Text('${w.daily[i].tempMin.round()}°',
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 15)),
+                    ],
                   ),
-                  Icon(w.daily[i].displayIcon, color: Colors.white, size: 22),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        const Icon(Icons.umbrella,
-                            color: Colors.white54, size: 13),
-                        const SizedBox(width: 2),
-                        Text('${w.daily[i].precipProbability}%',
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 12)),
-                      ],
+                  if (w.daily[i].rainSlots.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, top: 3),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.umbrella,
+                              color: Colors.white54, size: 12),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              'rain ${w.daily[i].rainSlots.join(', ')}',
+                              style: const TextStyle(
+                                  color: Colors.white60, fontSize: 11.5),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  Text('${w.daily[i].tempMax.round()}°',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15)),
-                  const SizedBox(width: 8),
-                  Text('${w.daily[i].tempMin.round()}°',
-                      style:
-                          const TextStyle(color: Colors.white54, fontSize: 15)),
                 ],
               ),
             ),
