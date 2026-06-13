@@ -1,8 +1,8 @@
-# Privacy Policy — Weather Daily
+# Privacy Policy — My Daily Weather
 
 _Last updated: 2026-06-14_
 
-Weather Daily ("we", "the service") respects your privacy. This policy covers
+My Daily Weather ("we", "the service") respects your privacy. This policy covers
 both the **mobile app** and the **Telegram weather bot**, which handle your
 location differently — please read both sections.
 

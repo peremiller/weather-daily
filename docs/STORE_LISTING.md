@@ -7,17 +7,17 @@ Google's; the text below fits them.
 
 ## App name (max 30 chars)
 ```
-Weather Daily
+My Daily Weather
 ```
 
 ## Short description (max 80 chars)
 ```
-Live local weather & a 7-day forecast, delivered to your chat every morning.
+Live local weather & a 12-day forecast, delivered to your chat every morning.
 ```
 
 ## Full description (max 4000 chars)
 ```
-Weather Daily gives you a clean, fast look at the weather wherever you are — and
+My Daily Weather gives you a clean, fast look at the weather wherever you are — and
 can message your daily forecast straight to your favorite chat app.
 
 CURRENT CONDITIONS AT A GLANCE
@@ -26,9 +26,10 @@ CURRENT CONDITIONS AT A GLANCE
 • Sunrise and sunset times
 • A colorful background that changes with the weather
 
-7-DAY FORECAST
-• See the week ahead at a glance
+12-DAY FORECAST
+• See nearly two weeks ahead at a glance
 • Daily highs, lows, conditions, and rain chance
+• Highlights the 3 driest days, ranked, so you can plan around the rain
 
 ANYWHERE IN THE WORLD
 • Search any city instantly
@@ -36,7 +37,7 @@ ANYWHERE IN THE WORLD
 • Your last location is remembered for next time
 
 DAILY WEATHER IN YOUR CHAT (optional)
-• Pair Weather Daily with our companion bot to get your morning forecast
+• Pair My Daily Weather with our companion bot to get your morning forecast
   delivered to Telegram automatically — no need to open the app
 
 PRIVACY FIRST

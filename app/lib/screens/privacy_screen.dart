@@ -17,7 +17,7 @@ class PrivacyScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: const [
-          Text('Privacy Policy — Weather Daily',
+          Text('Privacy Policy — My Daily Weather',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           SizedBox(height: 4),
           Text('Last updated: 2026-06-14',

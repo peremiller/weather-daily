@@ -1,6 +1,6 @@
 {
-    "name": "weather_daily",
-    "short_name": "weather_daily",
+    "name": "My Daily Weather",
+    "short_name": "My Daily Weather",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

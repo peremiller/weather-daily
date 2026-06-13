@@ -86,9 +86,9 @@ def make_feature():
     draw_cloud(img, 860, 275, 240)
 
     d = ImageDraw.Draw(img)
-    title = ImageFont.truetype(FONT_BOLD, 74)
+    title = ImageFont.truetype(FONT_BOLD, 62)
     tag = ImageFont.truetype(FONT_REG, 31)
-    d.text((70, 168), 'Weather Daily', font=title, fill=(255, 255, 255))
+    d.text((70, 175), 'My Daily Weather', font=title, fill=(255, 255, 255))
     d.text((74, 268), 'Your forecast — on your phone', font=tag, fill=(235, 245, 255))
     d.text((74, 308), 'and in your chats.', font=tag, fill=(235, 245, 255))
 

@@ -9,7 +9,7 @@ class WeatherDailyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Weather Daily',
+      title: 'My Daily Weather',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
