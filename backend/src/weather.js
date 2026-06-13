@@ -87,10 +87,13 @@ export async function getForecast(loc, timezone = config.timezone) {
     current: 'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m',
     daily:
       'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,wind_speed_10m_max',
+    hourly: 'precipitation',
     timezone,
     temperature_unit: config.units.temperature,
     wind_speed_unit: config.units.wind,
-    forecast_days: '1',
+    // 2 days of hourly data so we can find the next rain start/stop even if
+    // it crosses midnight.
+    forecast_days: '2',
   });
   const res = await fetch(`${FORECAST_URL}?${params.toString()}`);
   if (!res.ok) throw new Error(`Forecast failed: ${res.status} ${res.statusText}`);
@@ -101,6 +104,7 @@ export async function getForecast(loc, timezone = config.timezone) {
   return {
     location: loc,
     timezone: data.timezone,
+    now: cur.time, // local ISO of "now", used to phrase rain timing
     current: {
       temp: cur.temperature_2m,
       feelsLike: cur.apparent_temperature,
@@ -117,7 +121,45 @@ export async function getForecast(loc, timezone = config.timezone) {
       sunrise: d.sunrise[0],
       sunset: d.sunset[0],
     },
+    rain: computeRainOutlook(data.hourly, cur.time),
   };
+}
+
+// A measurable-rain threshold in mm/h. Below this we treat the hour as dry.
+const RAIN_THRESHOLD_MM = 0.1;
+
+/**
+ * From hourly precipitation, work out whether it's raining now and when that
+ * changes. Returns { rainingNow, type: 'start'|'stop'|'none', changeAt }.
+ *   - not raining now → `changeAt` = first upcoming hour with rain (type 'start')
+ *   - raining now     → `changeAt` = first upcoming dry hour (type 'stop')
+ *   - changeAt null   → no change within the forecast window.
+ */
+function computeRainOutlook(hourly, currentTime) {
+  if (!hourly?.time || !hourly?.precipitation) return null;
+  const times = hourly.time;
+  const precip = hourly.precipitation;
+
+  // Index of the hour bucket containing "now" (last hour <= current time).
+  let now = 0;
+  for (let i = 0; i < times.length; i++) {
+    if (times[i] <= currentTime) now = i;
+    else break;
+  }
+
+  const isWet = (i) => (precip[i] ?? 0) >= RAIN_THRESHOLD_MM;
+  const rainingNow = isWet(now);
+
+  if (rainingNow) {
+    for (let j = now + 1; j < times.length; j++) {
+      if (!isWet(j)) return { rainingNow, type: 'stop', changeAt: times[j] };
+    }
+    return { rainingNow, type: 'stop', changeAt: null };
+  }
+  for (let j = now + 1; j < times.length; j++) {
+    if (isWet(j)) return { rainingNow, type: 'start', changeAt: times[j] };
+  }
+  return { rainingNow, type: 'none', changeAt: null };
 }
 
 /** Convenience: resolve location + fetch forecast in one call. */
@@ -162,6 +204,49 @@ const timeOnly = (iso) => {
   return t.slice(0, 5);
 };
 
+/** "15:00" -> "3 PM", "15:30" -> "3:30 PM". */
+function formatHour12(time) {
+  let [h, m] = time.split(':').map(Number);
+  const ampm = h < 12 ? 'AM' : 'PM';
+  h = h % 12 === 0 ? 12 : h % 12;
+  return m === 0 ? `${h} ${ampm}` : `${h}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+// Date-only math via UTC anchor so it never shifts across timezones.
+const shiftDate = (dateStr, n) => {
+  const dt = new Date(`${dateStr}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+};
+const weekdayName = (dateStr) =>
+  ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][
+    new Date(`${dateStr}T00:00:00Z`).getUTCDay()
+  ];
+
+/** "" for today, "tomorrow " or "Friday " otherwise. */
+function dayPrefix(targetDate, nowDate) {
+  if (targetDate === nowDate) return '';
+  if (targetDate === shiftDate(nowDate, 1)) return 'tomorrow ';
+  return `${weekdayName(targetDate)} `;
+}
+
+/** Builds the "when will rain start/stop" line, or null if unavailable. */
+function rainLine(rain, nowIso) {
+  if (!rain) return null;
+  const nowDate = (nowIso || '').split('T')[0];
+  if (rain.type === 'stop') {
+    if (!rain.changeAt) return '🌧️ Rain looks set to continue for a while';
+    const [date, time] = rain.changeAt.split('T');
+    return `🌤️ Rain should ease ${dayPrefix(date, nowDate)}around ${formatHour12(time)}`;
+  }
+  // 'start' with a time, or 'none'
+  if (rain.type === 'start' && rain.changeAt) {
+    const [date, time] = rain.changeAt.split('T');
+    return `☔ Rain expected ${dayPrefix(date, nowDate)}around ${formatHour12(time)}`;
+  }
+  return '🌤️ No rain expected in the next 2 days';
+}
+
 /**
  * Build a human-friendly weather message.
  * `format` = 'plain' (Viber/Messenger) or 'markdown' (Telegram).
@@ -172,6 +257,8 @@ export function formatMessage(w, format = 'plain') {
   const cur = describeCode(w.current.code);
   const today = describeCode(w.today.code);
 
+  const rl = rainLine(w.rain, w.now);
+
   const lines = [
     `${cur.emoji} Weather for ${w.location.name}`,
     '',
@@ -179,6 +266,7 @@ export function formatMessage(w, format = 'plain') {
     `${today.emoji} Today: ${today.label}`,
     `🌡️ High ${Math.round(w.today.tempMax)}${t} / Low ${Math.round(w.today.tempMin)}${t}`,
     `🌧️ Rain chance: ${w.today.precipProb ?? 0}%`,
+    ...(rl ? [rl] : []),
     `💧 Humidity: ${w.current.humidity}%`,
     `💨 Wind: up to ${Math.round(w.today.windMax)} ${wu}`,
     `🌅 Sunrise ${timeOnly(w.today.sunrise)} · 🌇 Sunset ${timeOnly(w.today.sunset)}`,
