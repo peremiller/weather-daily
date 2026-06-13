@@ -11,7 +11,7 @@ RUN npm install --omit=dev
 COPY . .
 
 # Persist webhook-captured subscribers across restarts (mount a volume here).
-VOLUME ["/app/data"]
+# VOLUME ["/app/data"]
 
 ENV NODE_ENV=production
 EXPOSE 3000
