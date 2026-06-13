@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Secrets — never commit (also covered by app/ and backend/ .gitignore)
+**/.env
+**/key.properties
+*.jks
+*.keystore
+
+# Build / dependency output
+**/build/
+**/node_modules/
+backend/data/
+*.log

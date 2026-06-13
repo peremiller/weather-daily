@@ -1,0 +1,34 @@
+# Render.com blueprint. Push this repo, "New + → Blueprint", point at backend/.
+# IMPORTANT: pick a plan that does NOT sleep (the free web plan spins down on
+# inactivity, so the 7AM cron would not fire). "starter" stays always-on.
+services:
+  - type: web
+    name: weather-daily-backend
+    runtime: node
+    rootDir: backend
+    plan: starter            # always-on; free plan sleeps and breaks the cron
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: TZ_NAME
+        value: Asia/Manila
+      - key: LOCATION_NAME
+        value: Manila
+      - key: DAILY_CRON
+        value: 0 7 * * *
+      - key: TEMP_UNIT
+        value: celsius
+      - key: WIND_UNIT
+        value: kmh
+      # Secrets — set these in the Render dashboard, NOT here:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_IDS
+        sync: false
+      - key: VIBER_BOT_TOKEN
+        sync: false
+      - key: MESSENGER_PAGE_TOKEN
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
