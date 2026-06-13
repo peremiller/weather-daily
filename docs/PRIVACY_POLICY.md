@@ -50,8 +50,8 @@ children.
 
 ## Contact
 
-Questions about this policy: <your-email@example.com>
+Questions about this policy: <pjomill@gmail.com>
 
 ---
-_Replace the contact email and host this page at a public URL (e.g. GitHub Pages)
-for the Play Console privacy-policy field._
+_Host this page at a public URL (e.g. GitHub Pages) and paste that URL into the
+Play Console privacy-policy field._

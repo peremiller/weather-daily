@@ -51,7 +51,7 @@ class PrivacyScreen extends StatelessWidget {
           ),
           _Section(
             title: 'Contact',
-            body: 'Questions about this policy: your-email@example.com',
+            body: 'Questions about this policy: pjomill@gmail.com',
           ),
         ],
       ),
