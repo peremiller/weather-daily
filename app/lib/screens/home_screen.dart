@@ -363,7 +363,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               color: Colors.white54, fontSize: 15)),
                     ],
                   ),
-                  if (w.daily[i].rainSlots.isNotEmpty)
+                  // Rain timeslots only for the next 6 days (tomorrow..day 6).
+                  if (i >= 1 && i <= 6 && w.daily[i].rainSlots.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(left: 4, top: 3),
                       child: Row(

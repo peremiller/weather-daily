@@ -359,10 +359,11 @@ export function formatMessage(w, format = 'plain') {
 
   // Multi-day list: the next 12 days (tomorrow onward).
   const nextDays = (w.days || []).slice(0, 12);
-  const upcoming = nextDays.map((day) => {
+  const upcoming = nextDays.map((day, idx) => {
     const e = dailyEmoji(day.code, day.precipProb);
     let line = `${shortDate(day.date)}  ${e} ${Math.round(day.tempMax)}°/${Math.round(day.tempMin)}° · 💧${day.precipProb ?? 0}%`;
-    if (day.rainSlots && day.rainSlots.length) {
+    // Rain timeslots only for the next 6 days; omit them for later days.
+    if (idx < 6 && day.rainSlots && day.rainSlots.length) {
       line += `\n      ☔ rain ${day.rainSlots.join(', ')}`;
     }
     return line;
