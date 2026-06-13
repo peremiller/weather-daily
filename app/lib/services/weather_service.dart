@@ -78,6 +78,7 @@ class WeatherService {
           'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m',
       'daily':
           'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset',
+      'hourly': 'precipitation',
       'timezone': 'auto',
       'temperature_unit': temperatureUnit,
       'wind_speed_unit': windUnit,

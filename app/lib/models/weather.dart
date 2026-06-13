@@ -96,6 +96,8 @@ class Weather {
   final DateTime sunset;
   final List<DailyForecast> daily;
   final String unitSymbol;
+  final String now; // local ISO of "now", for rain-timing phrasing
+  final RainOutlook? rain;
 
   Weather({
     required this.locationName,
@@ -111,6 +113,8 @@ class Weather {
     required this.sunset,
     required this.daily,
     required this.unitSymbol,
+    required this.now,
+    this.rain,
   });
 
   WeatherCode get weather => WeatherCode.from(code);
@@ -156,6 +160,108 @@ class Weather {
       sunset: parse((daily['sunset'] as List)[0]),
       daily: forecasts,
       unitSymbol: unitSymbol,
+      now: current['time'] as String,
+      rain: RainOutlook.fromHourly(
+        json['hourly'] as Map<String, dynamic>?,
+        current['time'] as String?,
+      ),
     );
+  }
+}
+
+/// When rain will start (if dry now) or stop (if raining now), derived from
+/// the hourly precipitation forecast. Mirrors the Telegram bot's logic.
+class RainOutlook {
+  final bool rainingNow;
+  final String type; // 'start' | 'stop' | 'none'
+  final String? changeAt; // local ISO string, or null
+
+  const RainOutlook({required this.rainingNow, required this.type, this.changeAt});
+
+  static const _thresholdMm = 0.1;
+
+  static RainOutlook? fromHourly(Map<String, dynamic>? hourly, String? currentTime) {
+    if (hourly == null || currentTime == null) return null;
+    final times = (hourly['time'] as List?)?.cast<String>();
+    final precip = hourly['precipitation'] as List?;
+    if (times == null || precip == null || times.isEmpty) return null;
+
+    // Index of the hour bucket containing "now" (last hour <= current time).
+    var now = 0;
+    for (var i = 0; i < times.length; i++) {
+      if (times[i].compareTo(currentTime) <= 0) {
+        now = i;
+      } else {
+        break;
+      }
+    }
+    bool isWet(int i) => ((precip[i] ?? 0) as num) >= _thresholdMm;
+    final rainingNow = isWet(now);
+
+    if (rainingNow) {
+      for (var j = now + 1; j < times.length; j++) {
+        if (!isWet(j)) {
+          return RainOutlook(rainingNow: true, type: 'stop', changeAt: times[j]);
+        }
+      }
+      return const RainOutlook(rainingNow: true, type: 'stop', changeAt: null);
+    }
+    for (var j = now + 1; j < times.length; j++) {
+      if (isWet(j)) {
+        return RainOutlook(rainingNow: false, type: 'start', changeAt: times[j]);
+      }
+    }
+    return const RainOutlook(rainingNow: false, type: 'none', changeAt: null);
+  }
+
+  /// Human-readable line, e.g. "Rain expected tomorrow around 2 AM".
+  String label(String nowIso) {
+    final nowDate = nowIso.split('T').first;
+    if (type == 'stop') {
+      if (changeAt == null) return 'Rain set to continue for a while';
+      final parts = changeAt!.split('T');
+      return 'Rain should ease ${_dayPrefix(parts[0], nowDate)}around ${_formatHour(parts[1])}';
+    }
+    if (type == 'start' && changeAt != null) {
+      final parts = changeAt!.split('T');
+      return 'Rain expected ${_dayPrefix(parts[0], nowDate)}around ${_formatHour(parts[1])}';
+    }
+    return 'No rain expected in the next 2 days';
+  }
+
+  IconData get icon {
+    if (type == 'start' && changeAt != null) return Icons.umbrella;
+    if (type == 'stop') {
+      return changeAt != null ? Icons.wb_sunny_outlined : Icons.grain;
+    }
+    return Icons.wb_sunny_outlined;
+  }
+
+  static String _dayPrefix(String targetDate, String nowDate) {
+    if (targetDate == nowDate) return '';
+    if (targetDate == _shiftDate(nowDate, 1)) return 'tomorrow ';
+    return '${_weekday(targetDate)} ';
+  }
+
+  static String _shiftDate(String dateStr, int n) {
+    final d = DateTime.parse('${dateStr}T00:00:00Z').add(Duration(days: n));
+    return d.toUtc().toIso8601String().split('T').first;
+  }
+
+  static String _weekday(String dateStr) {
+    final d = DateTime.parse('${dateStr}T00:00:00Z');
+    const names = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+    ];
+    return names[d.weekday - 1];
+  }
+
+  static String _formatHour(String time) {
+    final parts = time.split(':');
+    var h = int.parse(parts[0]);
+    final m = int.parse(parts[1]);
+    final ampm = h < 12 ? 'AM' : 'PM';
+    h = h % 12 == 0 ? 12 : h % 12;
+    return m == 0 ? '$h $ampm' : '$h:${m.toString().padLeft(2, '0')} $ampm';
   }
 }

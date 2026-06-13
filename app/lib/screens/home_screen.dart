@@ -153,11 +153,43 @@ class _HomeScreenState extends State<HomeScreen> {
         _header(w),
         const SizedBox(height: 24),
         _current(w),
-        const SizedBox(height: 28),
+        const SizedBox(height: 20),
+        _rainBanner(w),
         _detailsGrid(w),
         const SizedBox(height: 28),
         _forecast(w),
       ],
+    );
+  }
+
+  Widget _rainBanner(Weather w) {
+    final rain = w.rain;
+    if (rain == null) return const SizedBox(height: 8);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Icon(rain.icon, color: Colors.white, size: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                rain.label(w.now),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
