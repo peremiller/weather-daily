@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/weather.dart';
 import '../services/weather_service.dart';
 import '../services/location_service.dart';
@@ -165,7 +166,50 @@ class _HomeScreenState extends State<HomeScreen> {
         _driestDays(w),
         const SizedBox(height: 28),
         _forecast(w),
+        const SizedBox(height: 16),
+        _telegramBanner(),
       ],
+    );
+  }
+
+  Future<void> _openTelegramBot() async {
+    final uri = Uri.parse('https://t.me/pjo_weather_bot');
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open Telegram')),
+        );
+      }
+    }
+  }
+
+  Widget _telegramBanner() {
+    return InkWell(
+      onTap: _openTelegramBot,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.send_rounded, color: Colors.white, size: 22),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Get your daily forecast on Telegram',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600),
+              ),
+            ),
+            const Icon(Icons.open_in_new, color: Colors.white70, size: 16),
+          ],
+        ),
+      ),
     );
   }
 
@@ -369,8 +413,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               color: Colors.white54, fontSize: 15)),
                     ],
                   ),
-                  // Rain timeslots only for the next 6 days (tomorrow..day 6).
-                  if (i >= 1 && i <= 6 && w.daily[i].rainSlots.isNotEmpty)
+                  // Rain timeslots for today + the next 6 days (not later days).
+                  if (i <= 6 && w.daily[i].rainSlots.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(left: 4, top: 3),
                       child: Row(

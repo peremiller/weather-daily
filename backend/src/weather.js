@@ -138,6 +138,7 @@ export async function getForecast(loc, timezone = config.timezone) {
       windMax: d.wind_speed_10m_max[0],
       sunrise: d.sunrise[0],
       sunset: d.sunset[0],
+      rainSlots: rainSlotsForDate(data.hourly, d.time[0]),
     },
     tomorrow: d.time.length > 1
       ? {
@@ -357,20 +358,26 @@ export function formatMessage(w, format = 'plain') {
     ? `🌄 Tomorrow: Sunrise ${timeOnly(w.tomorrow.sunrise)} · Sunset ${timeOnly(w.tomorrow.sunset)}`
     : null;
 
-  // Multi-day list: the next 12 days (tomorrow onward).
-  const nextDays = (w.days || []).slice(0, 12);
-  const upcoming = nextDays.map((day, idx) => {
+  // Today's rain windows.
+  const todaySlots =
+    w.today.rainSlots && w.today.rainSlots.length
+      ? `☔ Rain today: ${w.today.rainSlots.join(', ')}`
+      : null;
+
+  // Driest ranking still considers the full window (up to 12 days).
+  const window = (w.days || []).slice(0, 12);
+  // ...but the message itself shows only the next 6 days (rest live in the app).
+  const upcoming = window.slice(0, 6).map((day) => {
     const e = dailyEmoji(day.code, day.precipProb);
     let line = `${shortDate(day.date)}  ${e} ${Math.round(day.tempMax)}°/${Math.round(day.tempMin)}° · 💧${day.precipProb ?? 0}%`;
-    // Rain timeslots only for the next 6 days; omit them for later days.
-    if (idx < 6 && day.rainSlots && day.rainSlots.length) {
+    if (day.rainSlots && day.rainSlots.length) {
       line += `\n      ☔ rain ${day.rainSlots.join(', ')}`;
     }
     return line;
   });
 
   // Top 3 driest days (lowest rain chance) over the forecast window, ranked.
-  const driest = [...nextDays]
+  const driest = [...window]
     .sort((a, b) => (a.precipProb ?? 0) - (b.precipProb ?? 0) || a.date.localeCompare(b.date))
     .slice(0, 3)
     .map((day, i) => `${i + 1}. ${shortDate(day.date)} — 💧${day.precipProb ?? 0}% rain`);
@@ -383,16 +390,19 @@ export function formatMessage(w, format = 'plain') {
     `🌡️ High ${Math.round(w.today.tempMax)}${t} / Low ${Math.round(w.today.tempMin)}${t}`,
     `🌧️ Rain chance: ${w.today.precipProb ?? 0}%`,
     ...(rl ? [rl] : []),
+    ...(todaySlots ? [todaySlots] : []),
     `💧 Humidity: ${w.current.humidity}%`,
     `💨 Wind: up to ${Math.round(w.today.windMax)} ${wu}`,
     `🌅 Today: Sunrise ${timeOnly(w.today.sunrise)} · Sunset ${timeOnly(w.today.sunset)}`,
     ...(tomorrowSun ? [tomorrowSun] : []),
     ...(upcoming.length
-      ? ['', `📅 Next ${upcoming.length} days:`, ...upcoming]
+      ? ['', '📅 Next 6 days:', ...upcoming]
       : []),
     ...(driest.length
       ? ['', '🌤️ Driest days ahead (least rain):', ...driest]
       : []),
+    '',
+    '📱 See the full 12-day forecast — and switch your location anytime — in the My Daily Weather app.',
   ];
 
   let body = lines.join('\n');

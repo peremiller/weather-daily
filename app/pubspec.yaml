@@ -41,6 +41,8 @@ dependencies:
   geolocator: ^13.0.1
   # Persist the user's last selected location.
   shared_preferences: ^2.3.2
+  # Open the Telegram bot link.
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:
