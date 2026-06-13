@@ -46,6 +46,24 @@ export function describeCode(code) {
   return { label, emoji };
 }
 
+// Codes that already mean snow / thunderstorm — keep their own icon regardless
+// of the rain-probability override below.
+const SNOW_CODES = new Set([71, 73, 75, 77, 85, 86]);
+const STORM_CODES = new Set([95, 96, 99]);
+
+/**
+ * Picks a daily icon that's consistent with the rain probability, so a sunny
+ * icon never shows on a high-rain day. Falls back to the weather-code icon when
+ * rain is unlikely (and always for snow/thunderstorm).
+ */
+export function dailyEmoji(code, precipProb) {
+  const p = precipProb ?? 0;
+  if (SNOW_CODES.has(code) || STORM_CODES.has(code)) return describeCode(code).emoji;
+  if (p >= 70) return '🌧️';
+  if (p >= 40) return '🌦️';
+  return describeCode(code).emoji;
+}
+
 const tempUnitSymbol = () => (config.units.temperature === 'fahrenheit' ? '°F' : '°C');
 const windUnitSymbol = () => config.units.wind;
 
@@ -91,9 +109,9 @@ export async function getForecast(loc, timezone = config.timezone) {
     timezone,
     temperature_unit: config.units.temperature,
     wind_speed_unit: config.units.wind,
-    // 12 days: today + the next 11. Also gives plenty of hourly data to find
+    // 13 days: today + the next 12. Also gives plenty of hourly data to find
     // the next rain start/stop even across midnight.
-    forecast_days: '12',
+    forecast_days: '13',
   });
   const res = await fetch(`${FORECAST_URL}?${params.toString()}`);
   if (!res.ok) throw new Error(`Forecast failed: ${res.status} ${res.statusText}`);
@@ -295,11 +313,18 @@ export function formatMessage(w, format = 'plain') {
     ? `🌄 Tomorrow: Sunrise ${timeOnly(w.tomorrow.sunrise)} · Sunset ${timeOnly(w.tomorrow.sunset)}`
     : null;
 
-  // Multi-day list: the next 11 days (tomorrow onward).
-  const upcoming = (w.days || []).slice(0, 11).map((day) => {
-    const e = describeCode(day.code).emoji;
+  // Multi-day list: the next 12 days (tomorrow onward).
+  const nextDays = (w.days || []).slice(0, 12);
+  const upcoming = nextDays.map((day) => {
+    const e = dailyEmoji(day.code, day.precipProb);
     return `${shortDate(day.date)}  ${e} ${Math.round(day.tempMax)}°/${Math.round(day.tempMin)}° · 💧${day.precipProb ?? 0}%`;
   });
+
+  // Top 3 driest days (lowest rain chance) over the forecast window, ranked.
+  const driest = [...nextDays]
+    .sort((a, b) => (a.precipProb ?? 0) - (b.precipProb ?? 0) || a.date.localeCompare(b.date))
+    .slice(0, 3)
+    .map((day, i) => `${i + 1}. ${shortDate(day.date)} — 💧${day.precipProb ?? 0}% rain`);
 
   const lines = [
     `${cur.emoji} Weather for ${w.location.name}`,
@@ -315,6 +340,9 @@ export function formatMessage(w, format = 'plain') {
     ...(tomorrowSun ? [tomorrowSun] : []),
     ...(upcoming.length
       ? ['', `📅 Next ${upcoming.length} days:`, ...upcoming]
+      : []),
+    ...(driest.length
+      ? ['', '🌤️ Driest days ahead (least rain):', ...driest]
       : []),
   ];
 

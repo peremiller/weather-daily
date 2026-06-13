@@ -79,6 +79,17 @@ class DailyForecast {
   });
 
   WeatherCode get weather => WeatherCode.from(code);
+
+  /// An icon consistent with the rain probability, so a sunny icon never shows
+  /// on a high-rain day. Snow/thunderstorm keep their own icon.
+  IconData get displayIcon {
+    const snow = {71, 73, 75, 77, 85, 86};
+    const storm = {95, 96, 99};
+    if (snow.contains(code) || storm.contains(code)) return weather.icon;
+    if (precipProbability >= 70) return Icons.cloudy_snowing;
+    if (precipProbability >= 40) return Icons.water_drop_rounded;
+    return weather.icon;
+  }
 }
 
 /// The full weather snapshot shown on the home screen.
@@ -122,6 +133,16 @@ class Weather {
   });
 
   WeatherCode get weather => WeatherCode.from(code);
+
+  /// The 3 upcoming days (tomorrow onward) with the lowest rain chance, ranked.
+  List<DailyForecast> get driestDays {
+    final upcoming = daily.skip(1).toList()
+      ..sort((a, b) {
+        final byRain = a.precipProbability.compareTo(b.precipProbability);
+        return byRain != 0 ? byRain : a.date.compareTo(b.date);
+      });
+    return upcoming.take(3).toList();
+  }
 
   factory Weather.fromOpenMeteo(
     Map<String, dynamic> json,

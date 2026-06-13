@@ -158,6 +158,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _rainBanner(w),
         _detailsGrid(w),
         _tomorrowSun(w),
+        _driestDays(w),
         const SizedBox(height: 28),
         _forecast(w),
       ],
@@ -333,7 +334,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           fontSize: 14),
                     ),
                   ),
-                  Icon(w.daily[i].weather.icon, color: Colors.white, size: 22),
+                  Icon(w.daily[i].displayIcon, color: Colors.white, size: 22),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Row(
@@ -400,6 +401,72 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+  }
+
+  Widget _driestDays(Weather w) {
+    final days = w.driestDays;
+    if (days.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 24),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.wb_sunny_outlined, color: Colors.white, size: 18),
+                SizedBox(width: 8),
+                Text('Driest days ahead',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            for (var i = 0; i < days.length; i++)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      child: Text('${i + 1}.',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14)),
+                    ),
+                    Text(_shortDate(days[i].date),
+                        style: const TextStyle(color: Colors.white, fontSize: 14)),
+                    const Spacer(),
+                    const Icon(Icons.water_drop_outlined,
+                        color: Colors.white54, size: 14),
+                    const SizedBox(width: 3),
+                    Text('${days[i].precipProbability}%',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 14)),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _shortDate(DateTime d) {
+    const wd = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const mo = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${wd[d.weekday - 1]} ${mo[d.month - 1]} ${d.day}';
   }
 }
 
