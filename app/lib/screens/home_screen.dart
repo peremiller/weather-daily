@@ -387,17 +387,21 @@ class _HomeScreenState extends State<HomeScreen> {
     if (w.tomorrowSunrise == null || w.tomorrowSunset == null) {
       return const SizedBox.shrink();
     }
+    const style = TextStyle(color: Colors.white70, fontSize: 13);
     return Padding(
       padding: const EdgeInsets.only(top: 14),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.wb_twilight, color: Colors.white70, size: 16),
-          const SizedBox(width: 6),
-          Text(
-            'Tomorrow:  ↑ ${_time(w.tomorrowSunrise!)}   ↓ ${_time(w.tomorrowSunset!)}',
-            style: const TextStyle(color: Colors.white70, fontSize: 13),
-          ),
+          const Text('Tomorrow:', style: style),
+          const SizedBox(width: 8),
+          const Icon(Icons.wb_sunny_outlined, color: Colors.white70, size: 15),
+          const SizedBox(width: 4),
+          Text(_time(w.tomorrowSunrise!), style: style),
+          const SizedBox(width: 12),
+          const Icon(Icons.nightlight_outlined, color: Colors.white70, size: 14),
+          const SizedBox(width: 4),
+          Text(_time(w.tomorrowSunset!), style: style),
         ],
       ),
     );
