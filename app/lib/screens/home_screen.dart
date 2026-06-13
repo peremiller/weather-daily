@@ -156,6 +156,7 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 20),
         _rainBanner(w),
         _detailsGrid(w),
+        _tomorrowSun(w),
         const SizedBox(height: 28),
         _forecast(w),
       ],
@@ -301,7 +302,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _forecast(Weather w) {
-    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return Container(
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.15),
@@ -316,9 +316,9 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Row(
                 children: [
                   SizedBox(
-                    width: 44,
+                    width: 64,
                     child: Text(
-                      i == 0 ? 'Today' : weekdays[w.daily[i].date.weekday - 1],
+                      _dayLabel(i, w.daily[i].date),
                       style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w500,
@@ -364,6 +364,34 @@ class _HomeScreenState extends State<HomeScreen> {
     final m = dt.minute.toString().padLeft(2, '0');
     final ampm = dt.hour < 12 ? 'AM' : 'PM';
     return '$h:$m $ampm';
+  }
+
+  // "Today", "Tomorrow", then "Mon 16" etc. (date disambiguates the 12-day list).
+  String _dayLabel(int i, DateTime date) {
+    if (i == 0) return 'Today';
+    if (i == 1) return 'Tmrw';
+    const wd = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return '${wd[date.weekday - 1]} ${date.day}';
+  }
+
+  Widget _tomorrowSun(Weather w) {
+    if (w.tomorrowSunrise == null || w.tomorrowSunset == null) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.wb_twilight, color: Colors.white70, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            'Tomorrow:  ↑ ${_time(w.tomorrowSunrise!)}   ↓ ${_time(w.tomorrowSunset!)}',
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+        ],
+      ),
+    );
   }
 }
 

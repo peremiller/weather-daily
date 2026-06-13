@@ -98,6 +98,8 @@ class Weather {
   final String unitSymbol;
   final String now; // local ISO of "now", for rain-timing phrasing
   final RainOutlook? rain;
+  final DateTime? tomorrowSunrise;
+  final DateTime? tomorrowSunset;
 
   Weather({
     required this.locationName,
@@ -115,6 +117,8 @@ class Weather {
     required this.unitSymbol,
     required this.now,
     this.rain,
+    this.tomorrowSunrise,
+    this.tomorrowSunset,
   });
 
   WeatherCode get weather => WeatherCode.from(code);
@@ -161,6 +165,12 @@ class Weather {
       daily: forecasts,
       unitSymbol: unitSymbol,
       now: current['time'] as String,
+      tomorrowSunrise: (daily['sunrise'] as List).length > 1
+          ? parse((daily['sunrise'] as List)[1])
+          : null,
+      tomorrowSunset: (daily['sunset'] as List).length > 1
+          ? parse((daily['sunset'] as List)[1])
+          : null,
       rain: RainOutlook.fromHourly(
         json['hourly'] as Map<String, dynamic>?,
         current['time'] as String?,

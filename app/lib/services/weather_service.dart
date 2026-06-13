@@ -82,7 +82,7 @@ class WeatherService {
       'timezone': 'auto',
       'temperature_unit': temperatureUnit,
       'wind_speed_unit': windUnit,
-      'forecast_days': '7',
+      'forecast_days': '12',
     });
     final res = await http.get(uri);
     if (res.statusCode != 200) {
