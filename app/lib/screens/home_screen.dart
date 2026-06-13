@@ -20,6 +20,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   bool _loading = true;
 
+  // Forecast list shows the next 6 days by default; "More" reveals the rest.
+  bool _showAllDays = false;
+  static const _defaultDays = 7; // today + next 6
+
   // Defaults to Manila until the user picks a place / uses GPS.
   double _lat = 14.5995;
   double _lon = 120.9842;
@@ -311,6 +315,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _forecast(Weather w) {
+    final total = w.daily.length;
+    final visibleDays = _showAllDays || total <= _defaultDays ? total : _defaultDays;
     return Container(
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.15),
@@ -319,7 +325,7 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       child: Column(
         children: [
-          for (var i = 0; i < w.daily.length; i++) ...[
+          for (var i = 0; i < visibleDays; i++) ...[
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: Column(
@@ -385,9 +391,36 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            if (i != w.daily.length - 1)
+            if (i != visibleDays - 1)
               Divider(color: Colors.white.withValues(alpha: 0.12), height: 1),
           ],
+          if (total > _defaultDays)
+            InkWell(
+              onTap: () => setState(() => _showAllDays = !_showAllDays),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _showAllDays
+                          ? 'Show less'
+                          : 'More (${total - _defaultDays} days)',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14),
+                    ),
+                    Icon(
+                      _showAllDays ? Icons.expand_less : Icons.expand_more,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );
