@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { formatMessage } from '../weather.js';
+import { renderWeatherCard } from '../weatherCard.js';
 
 /**
  * Telegram Bot API integration.
@@ -24,10 +25,11 @@ async function call(method, payload) {
   return data.result;
 }
 
-/** Send the daily weather to all configured chat ids. */
+/** Send the daily weather (text + image card) to all configured chat ids. */
 export async function sendDaily(weather) {
   if (!config.telegram.enabled) return { skipped: true };
   const text = formatMessage(weather, 'markdown');
+  const card = safeCard(weather);
   const results = [];
   for (const chatId of config.telegram.chatIds) {
     try {
@@ -37,6 +39,7 @@ export async function sendDaily(weather) {
         parse_mode: 'Markdown',
         disable_web_page_preview: true,
       });
+      if (card) await sendPhoto(chatId, card).catch((e) => console.error('[telegram card]', e.message));
       results.push({ chatId, ok: true });
     } catch (err) {
       results.push({ chatId, ok: false, error: err.message });
@@ -51,6 +54,30 @@ export async function sendDaily(weather) {
  */
 export async function sendText(chatId, text, extra = {}) {
   return call('sendMessage', { chat_id: chatId, text, ...extra });
+}
+
+/** Render the weather card, returning null (and logging) if it fails. */
+export function safeCard(weather) {
+  try {
+    return renderWeatherCard(weather);
+  } catch (err) {
+    console.error('[telegram] card render failed:', err.message);
+    return null;
+  }
+}
+
+/** Send a PNG buffer as a photo message. */
+export async function sendPhoto(chatId, pngBuffer, caption) {
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  if (caption) form.append('caption', caption);
+  form.append('photo', new Blob([pngBuffer], { type: 'image/png' }), 'weather.png');
+  const res = await fetch(api('sendPhoto'), { method: 'POST', body: form });
+  const data = await res.json();
+  if (!data.ok) {
+    throw new Error(`Telegram sendPhoto failed: ${data.description || res.status}`);
+  }
+  return data.result;
 }
 
 /** Remove any registered webhook so long polling can be used instead. */

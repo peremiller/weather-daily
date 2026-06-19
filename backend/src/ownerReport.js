@@ -1,28 +1,23 @@
+import nodemailer from 'nodemailer';
 import { config } from './config.js';
 import { getAllUserLocations } from './store.js';
 import { getForecast, describeCode } from './weather.js';
-import * as telegram from './bots/telegram.js';
 
 /**
- * Builds and sends a daily statistics report to the app owner: every user who
+ * Builds and EMAILS a daily statistics report to the app owner: every user who
  * has shared a location, where they are, and the current weather there.
  *
- * NOTE: this shares users' locations with the owner — make sure your privacy
- * policy discloses it.
+ * The report is intentionally NOT posted to Telegram — it goes to OWNER_EMAIL
+ * via SMTP. NOTE: this shares users' locations with the owner; disclose it in
+ * your privacy policy.
  */
-export async function sendOwnerReport() {
-  const owner = config.telegram.ownerChatId;
-  if (!config.telegram.enabled || !owner) {
-    console.warn('[owner report] No Telegram owner chat id configured — skipping.');
-    return { skipped: true };
-  }
-
+async function buildReport() {
   const locations = await getAllUserLocations();
   const entries = Object.entries(locations); // [chatId, { name, latitude, longitude }]
-
   const dateLabel = new Date().toISOString().slice(0, 10);
+
   const lines = [
-    `📊 Daily User Report — ${dateLabel}`,
+    `Daily User Report — ${dateLabel}`,
     `Users with a saved location: ${entries.length}`,
     '',
   ];
@@ -45,16 +40,45 @@ export async function sendOwnerReport() {
       }
     }
     if (counted > 0) {
-      lines.push('', `🌡️ Average temperature across users: ${Math.round(temps / counted)}°`);
+      lines.push('', `Average temperature across users: ${Math.round(temps / counted)}°`);
     }
   }
 
+  return {
+    subject: `Weather — Daily User Report (${dateLabel}) · ${entries.length} users`,
+    text: lines.join('\n'),
+    users: entries.length,
+  };
+}
+
+export async function sendOwnerReport() {
+  const { email } = config;
+  if (!email.configured) {
+    console.warn(
+      '[owner report] SMTP not configured (set SMTP_USER/SMTP_PASS) — skipping email.'
+    );
+    return { skipped: true };
+  }
+
+  const report = await buildReport();
+  const transporter = nodemailer.createTransport({
+    host: email.host,
+    port: email.port,
+    secure: email.port === 465, // 465 = implicit TLS; 587 = STARTTLS
+    auth: { user: email.user, pass: email.pass },
+  });
+
   try {
-    await telegram.sendText(owner, lines.join('\n'));
-    console.log(`[owner report] Sent to ${owner} (${entries.length} users).`);
-    return { ok: true, users: entries.length };
+    await transporter.sendMail({
+      from: email.from || email.user,
+      to: email.to,
+      subject: report.subject,
+      text: report.text,
+    });
+    console.log(`[owner report] Emailed to ${email.to} (${report.users} users).`);
+    return { ok: true, users: report.users };
   } catch (err) {
-    console.error('[owner report] Failed to send:', err.message);
+    console.error('[owner report] Email failed:', err.message);
     return { ok: false, error: err.message };
   }
 }

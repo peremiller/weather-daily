@@ -46,6 +46,20 @@ export const config = {
   // When to send the owner's daily user report (cron, in TZ_NAME). Default 08:00.
   ownerReportCron: process.env.OWNER_REPORT_CRON || '0 8 * * *',
 
+  // The daily user report is emailed (not posted to Telegram). SMTP via env;
+  // Gmail needs an App Password (https://myaccount.google.com/apppasswords).
+  email: {
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(process.env.SMTP_PORT) || 465,
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
+    to: process.env.OWNER_EMAIL || 'pjomill@gmail.com',
+    get configured() {
+      return Boolean(this.host && this.user && this.pass && this.to);
+    },
+  },
+
   viber: {
     enabled: Boolean(process.env.VIBER_BOT_TOKEN),
     token: process.env.VIBER_BOT_TOKEN || '',

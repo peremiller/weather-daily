@@ -396,7 +396,7 @@ export function formatMessage(w, format = 'plain') {
     `🌅 Today: Sunrise ${timeOnly(w.today.sunrise)} · Sunset ${timeOnly(w.today.sunset)}`,
     ...(tomorrowSun ? [tomorrowSun] : []),
     ...(upcoming.length
-      ? ['', '📅 Next 6 days:', ...upcoming]
+      ? ['', '📅 Next 6 days:', '', upcoming.join('\n\n')]
       : []),
     ...(driest.length
       ? ['', '🌤️ Driest days ahead (least rain):', ...driest]

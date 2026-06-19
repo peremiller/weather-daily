@@ -61,7 +61,7 @@ const LOCATION_KEYBOARD = {
 // Subtle footer reminding users how to update their saved location.
 const CHANGE_LOCATION_HINT = '\n\nℹ️ Moved? Send /changelocation to update your location.';
 
-/** Fetch + send the forecast for a stored {name, latitude, longitude}. */
+/** Fetch + send the forecast (text + image card) for a stored location. */
 async function sendForecastFor(chatId, loc) {
   // timezone 'auto' → sunrise/sunset etc. localised to the user's own area.
   const weather = await getForecast(loc, 'auto');
@@ -70,6 +70,11 @@ async function sendForecastFor(chatId, loc) {
     formatMessage(weather, 'plain') + CHANGE_LOCATION_HINT,
     { reply_markup: { remove_keyboard: true } }
   );
+  // Image card at the end of the message.
+  const card = telegram.safeCard(weather);
+  if (card) {
+    await telegram.sendPhoto(chatId, card).catch((e) => console.error('[telegram card]', e.message));
+  }
 }
 
 /** Prompt the user to share a (new) location. */
@@ -87,9 +92,15 @@ export async function handleTelegramMessage(msg) {
   const text = (msg.text || '').trim().toLowerCase();
 
   try {
-    // Owner-only: send the daily user report on demand.
+    // Owner-only: email the daily user report on demand (never shown in chat).
     if (text === '/report' && String(chatId) === String(config.telegram.ownerChatId)) {
-      await sendOwnerReport();
+      const r = await sendOwnerReport();
+      const msg = r.ok
+        ? `📧 Daily user report emailed to ${config.email.to}.`
+        : r.skipped
+          ? '⚠️ Email isn\'t configured yet (set SMTP_USER / SMTP_PASS).'
+          : `⚠️ Couldn't send the report: ${r.error || 'unknown error'}`;
+      await telegram.sendText(chatId, msg);
       return;
     }
 

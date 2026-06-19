@@ -32,8 +32,8 @@ export function startScheduler() {
     `[scheduler] Daily broadcast scheduled: "${config.dailyCron}" (${config.timezone})`
   );
 
-  // 2) Daily owner report (users + their weather).
-  if (config.telegram.enabled && config.telegram.ownerChatId) {
+  // 2) Daily owner report (users + their weather) — emailed, not posted to chat.
+  if (config.email.to) {
     cron.schedule(
       config.ownerReportCron,
       async () => {
@@ -47,7 +47,7 @@ export function startScheduler() {
       { timezone: config.timezone }
     );
     console.log(
-      `[scheduler] Owner report scheduled: "${config.ownerReportCron}" (${config.timezone}) -> chat ${config.telegram.ownerChatId}`
+      `[scheduler] Owner report scheduled: "${config.ownerReportCron}" (${config.timezone}) -> email ${config.email.to}${config.email.configured ? '' : ' (SMTP not configured yet)'}`
     );
   }
 }
