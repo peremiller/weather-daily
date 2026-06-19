@@ -170,12 +170,34 @@ export function renderWeatherCard(w) {
   ctx.lineTo(W - 56, 372);
   ctx.stroke();
 
-  // 6-day row
+  // 6-day row — with the driest day (lowest rain chance) highlighted.
   const days = (w.days || []).slice(0, 6);
   const colW = (W - 112) / 6;
+  let driestIdx = 0;
+  for (let i = 1; i < days.length; i++) {
+    if ((days[i].precipProb ?? 101) < (days[driestIdx].precipProb ?? 101)) driestIdx = i;
+  }
   ctx.textAlign = 'center';
   days.forEach((d, i) => {
     const cx = 56 + colW * (i + 0.5);
+    if (i === driestIdx) {
+      // highlight the column
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      roundRect(ctx, cx - colW * 0.42, 400, colW * 0.84, 188, 18);
+      ctx.fill();
+      ctx.restore();
+      // "☀ Driest" indicator above the column
+      ctx.font = '22px RobotoBold';
+      const label = 'Driest';
+      const tw2 = ctx.measureText(label).width;
+      const sx = cx - (16 + 8 + tw2) / 2;
+      sun(ctx, sx + 7, 390, 7);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffe08a';
+      ctx.fillText(label, sx + 22, 380);
+      ctx.textAlign = 'center';
+    }
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
     ctx.font = '30px RobotoBold';
     ctx.fillText(dayAbbr(d.date), cx, 410);
