@@ -115,6 +115,30 @@ const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dayAbbr = (dateStr) => wd[new Date(`${dateStr}T00:00:00Z`).getUTCDay()];
 const unit = () => (config.units.temperature === 'fahrenheit' ? '°F' : '°C');
 
+// "2026-06-19T05:26" -> "5:26 AM"
+function fmt12(iso) {
+  const t = (iso || '').split('T')[1] || '';
+  let [h, m] = t.split(':').map(Number);
+  if (Number.isNaN(h)) return '';
+  const ap = h < 12 ? 'AM' : 'PM';
+  h = h % 12 || 12;
+  return `${h}:${String(m || 0).padStart(2, '0')} ${ap}`;
+}
+
+// A small "sun on the horizon" icon for sunrise/sunset.
+function sunHorizon(ctx, cx, cy, color) {
+  sun(ctx, cx, cy - 4, 11, color);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - 20, cy + 14);
+  ctx.lineTo(cx + 20, cy + 14);
+  ctx.stroke();
+  ctx.restore();
+}
+
 /** Render the weather card as a PNG Buffer. */
 export function renderWeatherCard(w) {
   const canvas = createCanvas(W, H);
@@ -161,6 +185,27 @@ export function renderWeatherCard(w) {
     214
   );
   ctx.textAlign = 'left';
+
+  // sunrise / sunset (middle band)
+  const srTxt = `Sunrise ${fmt12(w.today.sunrise)}`;
+  const ssTxt = `Sunset ${fmt12(w.today.sunset)}`;
+  ctx.font = '30px Roboto';
+  const iconW = 46;
+  const srW = iconW + ctx.measureText(srTxt).width;
+  const ssW = iconW + ctx.measureText(ssTxt).width;
+  const total = srW + 70 + ssW;
+  let sx2 = (W - total) / 2;
+  const midY = 312;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  sunHorizon(ctx, sx2 + 16, midY, '#ffd23f');
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText(srTxt, sx2 + iconW, midY);
+  sx2 += srW + 70;
+  sunHorizon(ctx, sx2 + 16, midY, '#ff9e5e');
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText(ssTxt, sx2 + iconW, midY);
+  ctx.textBaseline = 'top';
 
   // divider
   ctx.strokeStyle = 'rgba(255,255,255,0.22)';
