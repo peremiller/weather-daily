@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { getTropicalCyclone } from './pagasa.js';
 
 /**
  * Open-Meteo client. No API key required.
@@ -98,6 +99,10 @@ export async function resolveLocation() {
  * Fetch today's forecast for the given coordinates.
  * Returns a normalised object used by the message formatter.
  */
+export function isPhilippines(lat, lon) {
+  return lat >= 4.5 && lat <= 21.5 && lon >= 116 && lon <= 127;
+}
+
 export async function getForecast(loc, timezone = config.timezone) {
   const params = new URLSearchParams({
     latitude: String(loc.latitude),
@@ -113,13 +118,18 @@ export async function getForecast(loc, timezone = config.timezone) {
     // the next rain start/stop even across midnight.
     forecast_days: '13',
   });
+  // For Philippine locations, use the GFS model — the same model PAGASA's
+  // official 10-day forecast is built on — so the numbers align with PAGASA.
+  if (isPhilippines(loc.latitude, loc.longitude)) {
+    params.set('models', 'gfs_seamless');
+  }
   const res = await fetch(`${FORECAST_URL}?${params.toString()}`);
   if (!res.ok) throw new Error(`Forecast failed: ${res.status} ${res.statusText}`);
   const data = await res.json();
 
   const cur = data.current;
   const d = data.daily;
-  return {
+  const out = {
     location: loc,
     timezone: data.timezone,
     now: cur.time, // local ISO of "now", used to phrase rain timing
@@ -164,6 +174,18 @@ export async function getForecast(loc, timezone = config.timezone) {
     }),
     rain: computeRainOutlook(data.hourly, cur.time),
   };
+
+  // For PH locations: note the GFS model alignment and attach PAGASA's
+  // official tropical-cyclone status (cached, best-effort).
+  if (isPhilippines(loc.latitude, loc.longitude)) {
+    out.gfsModel = true;
+    try {
+      out.pagasa = await getTropicalCyclone();
+    } catch {
+      out.pagasa = null;
+    }
+  }
+  return out;
 }
 
 // A measurable-rain threshold in mm/h. Below this we treat the hour as dry.
@@ -382,9 +404,25 @@ export function formatMessage(w, format = 'plain') {
     .slice(0, 3)
     .map((day, i) => `${i + 1}. ${shortDate(day.date)} — 💧${day.precipProb ?? 0}% rain`);
 
+  // PAGASA tropical-cyclone status (PH only). Active = prominent alert at top.
+  const tc = w.pagasa;
+  const tcAlert =
+    tc && tc.active
+      ? [
+          `🚨 PAGASA WARNING: ${tc.name}${tc.signals && tc.signals.length ? ` — ${tc.signals.join(', ')}` : ''}`,
+          'Check pagasa.dost.gov.ph for the latest bulletin.',
+          '',
+        ]
+      : [];
+  // Footer bits for PH: clear-status note + the GFS/PAGASA source line.
+  const phFooter = [];
+  if (tc && !tc.active) phFooter.push('🌀 PAGASA: No active tropical cyclone in PH');
+  if (w.gfsModel) phFooter.push('📡 Forecast model: GFS (PAGASA\'s 10-day basis)');
+
   const lines = [
     `${cur.emoji} Weather for ${w.location.name}`,
     '',
+    ...tcAlert,
     `${cur.emoji} Now: ${Math.round(w.current.temp)}${t} (feels ${Math.round(w.current.feelsLike)}${t}) — ${cur.label}`,
     `${today.emoji} Today: ${today.label}`,
     `🌡️ High ${Math.round(w.today.tempMax)}${t} / Low ${Math.round(w.today.tempMin)}${t}`,
@@ -401,6 +439,7 @@ export function formatMessage(w, format = 'plain') {
     ...(driest.length
       ? ['', '🌤️ Driest days ahead (least rain):', ...driest]
       : []),
+    ...(phFooter.length ? ['', ...phFooter] : []),
     '',
     '📱 See the full 12-day forecast — and switch your location anytime — in the My Daily Weather app.',
   ];
