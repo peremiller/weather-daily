@@ -3,6 +3,7 @@ import { config, enabledChannels } from './config.js';
 import { startScheduler } from './scheduler.js';
 import { broadcastDaily } from './broadcast.js';
 import { sendOwnerReport } from './ownerReport.js';
+import { pagasaTenDayPanel } from './pagasaTenDay.js';
 import { getDailyWeather, getForecast, formatMessage, reverseGeocode } from './weather.js';
 import {
   addSubscriber,
@@ -65,11 +66,17 @@ const CHANGE_LOCATION_HINT = '\n\nℹ️ Moved? Send /changelocation to update y
 async function sendForecastFor(chatId, loc) {
   // timezone 'auto' → sunrise/sunset etc. localised to the user's own area.
   const weather = await getForecast(loc, 'auto');
-  await telegram.sendText(
-    chatId,
-    formatMessage(weather, 'plain') + CHANGE_LOCATION_HINT,
-    { reply_markup: { remove_keyboard: true } }
-  );
+  let text = formatMessage(weather, 'plain') + CHANGE_LOCATION_HINT;
+  // PAGASA official TenDay panel (PH only; best-effort).
+  try {
+    const panel = await pagasaTenDayPanel(loc);
+    if (panel) text += '\n\n' + panel;
+  } catch {
+    /* skip panel on error */
+  }
+  await telegram.sendText(chatId, text, {
+    reply_markup: { remove_keyboard: true },
+  });
   // Image card at the end of the message.
   const card = telegram.safeCard(weather);
   if (card) {

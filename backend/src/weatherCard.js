@@ -10,7 +10,7 @@ GlobalFonts.registerFromPath(join(FONTS, 'roboto-400.woff2'), 'Roboto');
 GlobalFonts.registerFromPath(join(FONTS, 'roboto-700.woff2'), 'RobotoBold');
 
 const W = 1080;
-const H = 640;
+const BASE_H = 640;
 const R = '#ffffff';
 
 // Gradient palette per weather category (matches the app's mood).
@@ -141,6 +141,9 @@ function sunHorizon(ctx, cx, cy, color) {
 
 /** Render the weather card as a PNG Buffer. */
 export function renderWeatherCard(w) {
+  const alert = !!(w.pagasa && w.pagasa.active);
+  const bannerH = alert ? 76 : 0;
+  const H = BASE_H + bannerH;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
 
@@ -152,6 +155,13 @@ export function renderWeatherCard(w) {
   ctx.fillStyle = g;
   roundRect(ctx, 0, 0, W, H, 36);
   ctx.fill();
+
+  // PAGASA tropical-cyclone alert strip across the top (only when active).
+  if (alert) drawAlertBanner(ctx, w.pagasa, bannerH);
+
+  // shift the rest of the card below the alert strip
+  ctx.save();
+  ctx.translate(0, bannerH);
 
   ctx.textBaseline = 'top';
 
@@ -261,7 +271,46 @@ export function renderWeatherCard(w) {
   ctx.font = '24px Roboto';
   ctx.fillText('My Daily Weather', W / 2, 600);
 
+  ctx.restore();
   return canvas.toBuffer('image/png');
+}
+
+// Red PAGASA tropical-cyclone alert strip (rounded top corners, flat bottom).
+function drawAlertBanner(ctx, pagasa, bannerH) {
+  ctx.save();
+  ctx.fillStyle = '#d32f2f';
+  ctx.beginPath();
+  ctx.moveTo(0, bannerH);
+  ctx.lineTo(0, 36);
+  ctx.arcTo(0, 0, 36, 0, 36);
+  ctx.lineTo(W - 36, 0);
+  ctx.arcTo(W, 0, W, 36, 36);
+  ctx.lineTo(W, bannerH);
+  ctx.closePath();
+  ctx.fill();
+
+  // warning triangle
+  const cy = bannerH / 2;
+  ctx.fillStyle = '#ffd23f';
+  ctx.beginPath();
+  ctx.moveTo(56, cy - 22);
+  ctx.lineTo(80, cy + 18);
+  ctx.lineTo(32, cy + 18);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#7a1f1f';
+  ctx.font = '28px RobotoBold';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('!', 56, cy + 3);
+
+  const sig =
+    pagasa.signals && pagasa.signals.length ? '  ·  ' + pagasa.signals.join(', ') : '';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'left';
+  ctx.font = '30px RobotoBold';
+  ctx.fillText(trunc(`PAGASA: ${pagasa.name}${sig}`, 50), 100, cy + 2);
+  ctx.restore();
 }
 
 function roundRect(ctx, x, y, w, h, r) {

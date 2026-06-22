@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { formatMessage } from '../weather.js';
 import { renderWeatherCard } from '../weatherCard.js';
+import { pagasaTenDayPanel } from '../pagasaTenDay.js';
 
 /**
  * Telegram Bot API integration.
@@ -28,7 +29,13 @@ async function call(method, payload) {
 /** Send the daily weather (text + image card) to all configured chat ids. */
 export async function sendDaily(weather) {
   if (!config.telegram.enabled) return { skipped: true };
-  const text = formatMessage(weather, 'markdown');
+  let text = formatMessage(weather, 'markdown');
+  try {
+    const panel = await pagasaTenDayPanel(weather.location);
+    if (panel) text += '\n\n' + panel;
+  } catch {
+    /* skip panel on error */
+  }
   const card = safeCard(weather);
   const results = [];
   for (const chatId of config.telegram.chatIds) {
