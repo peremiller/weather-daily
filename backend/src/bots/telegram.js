@@ -36,7 +36,7 @@ export async function sendDaily(weather) {
   } catch {
     /* skip panel on error */
   }
-  const card = safeCard(weather);
+  const card = await safeCard(weather);
   const results = [];
   for (const chatId of config.telegram.chatIds) {
     try {
@@ -64,9 +64,9 @@ export async function sendText(chatId, text, extra = {}) {
 }
 
 /** Render the weather card, returning null (and logging) if it fails. */
-export function safeCard(weather) {
+export async function safeCard(weather) {
   try {
-    return renderWeatherCard(weather);
+    return await renderWeatherCard(weather);
   } catch (err) {
     console.error('[telegram] card render failed:', err.message);
     return null;

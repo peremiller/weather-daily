@@ -1,5 +1,7 @@
 # Always-on container for the Weather Daily backend.
-FROM node:20-alpine
+# Debian (slim), not Alpine — the @napi-rs/canvas native binary is reliable on
+# glibc; Alpine/musl was crashing the bot at startup.
+FROM node:20-slim
 
 WORKDIR /app
 

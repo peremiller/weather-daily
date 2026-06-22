@@ -78,7 +78,7 @@ async function sendForecastFor(chatId, loc) {
     reply_markup: { remove_keyboard: true },
   });
   // Image card at the end of the message.
-  const card = telegram.safeCard(weather);
+  const card = await telegram.safeCard(weather);
   if (card) {
     await telegram.sendPhoto(chatId, card).catch((e) => console.error('[telegram card]', e.message));
   }

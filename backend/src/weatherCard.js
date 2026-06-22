@@ -1,13 +1,22 @@
-import { createCanvas, GlobalFonts } from '@napi-rs/canvas';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describeCode } from './weather.js';
 import { config } from './config.js';
 
+// @napi-rs/canvas is a native module — load it LAZILY so that, if it fails to
+// load in a given environment, only the image card is skipped (the rest of the
+// bot keeps working). Fonts are registered once on first successful load.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FONTS = join(__dirname, 'assets', 'fonts');
-GlobalFonts.registerFromPath(join(FONTS, 'roboto-400.woff2'), 'Roboto');
-GlobalFonts.registerFromPath(join(FONTS, 'roboto-700.woff2'), 'RobotoBold');
+let _canvas = null;
+async function loadCanvas() {
+  if (_canvas) return _canvas;
+  const mod = await import('@napi-rs/canvas');
+  mod.GlobalFonts.registerFromPath(join(FONTS, 'roboto-400.woff2'), 'Roboto');
+  mod.GlobalFonts.registerFromPath(join(FONTS, 'roboto-700.woff2'), 'RobotoBold');
+  _canvas = mod;
+  return mod;
+}
 
 const W = 1080;
 const BASE_H = 640;
@@ -139,8 +148,9 @@ function sunHorizon(ctx, cx, cy, color) {
   ctx.restore();
 }
 
-/** Render the weather card as a PNG Buffer. */
-export function renderWeatherCard(w) {
+/** Render the weather card as a PNG Buffer (async: loads canvas lazily). */
+export async function renderWeatherCard(w) {
+  const { createCanvas } = await loadCanvas();
   const alert = !!(w.pagasa && w.pagasa.active);
   const bannerH = alert ? 76 : 0;
   const H = BASE_H + bannerH;
