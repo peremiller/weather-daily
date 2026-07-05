@@ -12,6 +12,8 @@
  * GDACS, and the card/message attribute it. No clickbait.
  */
 
+import { getParTiming, estimateParEntry } from './typhoonForecast.js';
+
 const GDACS_URL =
   'https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP';
 const UA = 'Mozilla/5.0 (weather-daily typhoon-watch)';
@@ -58,6 +60,17 @@ function parStatus(lon, lat) {
 
 const cleanName = (n) => String(n || '').replace(/-\d{2}$/, ''); // "BAVI-26" -> "BAVI"
 
+// PAGASA assigns a Philippine local name from its fixed yearly list the moment a
+// system ENTERS PAR. A system still approaching has no OFFICIAL local name yet —
+// but the sequence makes the incoming name predictable, so we surface it as the
+// "expected" PH name (mapped from the international name) until PAGASA confirms
+// it on entry. Extend this map as new systems approach.
+const EXPECTED_PH_NAME = {
+  BAVI: 'Inday', // 9th name on PAGASA's 2026 list
+};
+const expectedLocalName = (intlName) =>
+  EXPECTED_PH_NAME[String(intlName || '').toUpperCase()] || null;
+
 /**
  * Returns the most relevant system for the PH, or { active:false }.
  * Shape when active:
@@ -87,9 +100,11 @@ export async function getTyphoonWatch() {
         if (status === 'outside') return null; // not PH-relevant
         const kph = p.severitydata && Math.round(p.severitydata.severity);
         const { cat, abbr } = categorize(kph);
+        const nm = cleanName(p.eventname || p.name);
         return {
           active: true,
-          name: cleanName(p.eventname || p.name),
+          name: nm,
+          localName: expectedLocalName(nm), // expected PAGASA name, or null
           category: cat,
           catAbbr: abbr,
           alert: p.alertlevel || null,
@@ -112,6 +127,16 @@ export async function getTyphoonWatch() {
       });
 
     const value = systems[0] || { active: false };
+    // Attach PAR entry/exit timing: prefer the official JMA forecast track,
+    // fall back to a labelled kinematic estimate. Best-effort; never fatal.
+    if (value.active) {
+      try {
+        value.timing =
+          (await getParTiming(value.name)) || estimateParEntry(value) || null;
+      } catch {
+        value.timing = estimateParEntry(value) || null;
+      }
+    }
     cache = { t: now, value };
     return value;
   } catch (err) {
@@ -125,8 +150,9 @@ export async function getTyphoonWatch() {
 export function typhoonWatchLine(t) {
   if (!t || !t.active) return null;
   const w = t.maxWindKph ? ` · ${t.maxWindKph} km/h winds` : '';
+  const ph = t.localName ? ` (expected PH name: ${t.localName})` : '';
   if (t.status === 'inside') {
-    return `🌀 ${t.category} ${t.name} is inside PAR${w} (${t.source}). Follow PAGASA bulletins.`;
+    return `🌀 ${t.category} ${t.name}${ph} is inside PAR${w} (${t.source}). Follow PAGASA bulletins.`;
   }
-  return `🌀 ${t.category} ${t.name} is approaching PAR from the east${w} (${t.source}). Not yet inside — watch for a PAGASA local name.`;
+  return `🌀 ${t.category} ${t.name}${ph} is approaching PAR from the east${w} (${t.source}). Not yet inside — official name & timing come from PAGASA on entry.`;
 }

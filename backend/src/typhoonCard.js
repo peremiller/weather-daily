@@ -25,7 +25,7 @@ async function loadCanvas() {
 }
 
 const W = 1080;
-const H = 1350;
+const H = 1480; // taller to fit the PAR entry/exit band
 
 // Geographic window the map panel spans (lon/lat). Includes PH (~120°E) and the
 // Western Pacific approach corridor (~150°E).
@@ -70,7 +70,7 @@ export async function renderTyphoonCard(t, opts = {}) {
   ctx.fillRect(0, 0, W, H);
 
   // ================= HEADLINE BANNER =================
-  const banH = 210;
+  const banH = t.localName ? 252 : 210; // extra row for the expected PH name
   const bgrad = ctx.createLinearGradient(0, 0, W, banH);
   bgrad.addColorStop(0, '#7a1418');
   bgrad.addColorStop(1, ac);
@@ -99,9 +99,15 @@ export async function renderTyphoonCard(t, opts = {}) {
     58,
     176
   );
+  // expected Philippine local name (PAGASA names on entry)
+  if (t.localName) {
+    ctx.font = '30px RobotoBold';
+    ctx.fillStyle = '#ffe08a';
+    ctx.fillText(`EXPECTED PH NAME: ${t.localName.toUpperCase()}`, 58, 220);
+  }
 
   // ================= MAP PANEL =================
-  const px = 40, py = banH + 34, pw = W - 80, ph = 700;
+  const px = 40, py = banH + 34, pw = W - 80, ph = 640;
   // red frame like the reference postcards
   ctx.save();
   roundRect(ctx, px - 6, py - 6, pw + 12, ph + 12, 20);
@@ -184,8 +190,9 @@ export async function renderTyphoonCard(t, opts = {}) {
   // the cyclone swirl
   cyclone(ctx, scx, scy, gr(6), ac);
 
-  // storm name tag on the map
-  tag(ctx, `${t.catAbbr} ${t.name}`, scx, scy + gr(6) + 26, ac);
+  // storm name tag on the map (int'l name + expected PH name)
+  tag(ctx, t.localName ? `${t.catAbbr} ${t.name} · ${t.localName}` : `${t.catAbbr} ${t.name}`,
+    scx, scy + gr(6) + 26, ac);
 
   ctx.restore(); // end panel clip
 
@@ -214,8 +221,39 @@ export async function renderTyphoonCard(t, opts = {}) {
     fitText(ctx, v, x + 12, sy + 66, cw - 24, 40, 'center');
   });
 
+  // ================= PAR ENTRY / EXIT BAND =================
+  const bandY = sy + 128 + 22;
+  const bandH = 132;
+  const tcells = [
+    ['PAR ENTRY', fmtTiming(t.timing, 'entry')],
+    ['PAR EXIT', fmtTiming(t.timing, 'exit')],
+  ];
+  const tcw = (W - 80 - 24) / 2;
+  tcells.forEach(([k, val], i) => {
+    const x = 40 + i * (tcw + 24);
+    roundRect(ctx, x, bandY, tcw, bandH, 16);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '24px RobotoBold';
+    ctx.fillText(k, x + tcw / 2, bandY + 16);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '36px RobotoBold';
+    fitText(ctx, val.main, x + 14, bandY + 52, tcw - 28, 36, 'center');
+    if (val.sub) {
+      ctx.fillStyle = val.estimate ? '#ffd23f' : 'rgba(255,255,255,0.6)';
+      ctx.font = '22px Roboto';
+      fitText(ctx, val.sub, x + 14, bandY + 98, tcw - 28, 22, 'center', false);
+    }
+  });
+
   // position + status line (auto-fit to width)
-  const posY = sy + 128 + 36;
+  const posY = bandY + bandH + 30;
   ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
   const ns = t.lat >= 0 ? 'N' : 'S';
@@ -238,13 +276,46 @@ export async function renderTyphoonCard(t, opts = {}) {
   ctx.fillText(`FORECAST · ${opts.date || dateLabel()}`, 40, stripY + 34);
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '24px Roboto';
-  ctx.fillText('Source: GDACS · Follow official PAGASA bulletins', 40, stripY + 68);
+  const src = t.timing?.source === 'JMA (RSMC Tokyo)'
+    ? 'Source: GDACS + JMA forecast · Follow official PAGASA bulletins'
+    : t.timing?.source === 'estimate'
+      ? 'Entry estimated · Source: GDACS · Follow official PAGASA bulletins'
+      : 'Source: GDACS · Follow official PAGASA bulletins';
+  ctx.fillText(src, 40, stripY + 68);
   ctx.textAlign = 'right';
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   ctx.font = '28px RobotoBold';
   ctx.fillText('My Daily Weather', W - 40, stripY + 50);
 
   return canvas.toBuffer('image/png');
+}
+
+// Convert a UTC ms to Philippine time (UTC+8) parts for display.
+function pht(ms) {
+  const d = new Date(ms + 8 * 3600 * 1000); // shift, then read UTC fields
+  const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
+  const mo = MONTHS[d.getUTCMonth()];
+  let h = d.getUTCHours();
+  const m = d.getUTCMinutes();
+  const ap = h < 12 ? 'AM' : 'PM';
+  h = h % 12 || 12;
+  const time = m ? `${h}:${String(m).padStart(2, '0')} ${ap}` : `${h} ${ap}`;
+  return { label: `${wd} ${mo} ${d.getUTCDate()}`, time };
+}
+
+// A cell's ENTRY/EXIT text: official JMA time, a labelled estimate, or a
+// PAGASA-defers message — never a fabricated precise time.
+function fmtTiming(timing, which) {
+  if (!timing || !timing[which]) {
+    return { main: 'PAGASA advises', sub: which === 'exit' ? 'beyond forecast' : 'on approach' };
+  }
+  const seg = timing[which];
+  const isEst = timing.source === 'estimate' || seg.estimate;
+  const d = pht(seg.ms);
+  if (isEst) {
+    return { main: `~${d.label}`, sub: `est. · assumed ${timing.assumedKmh || 20} km/h`, estimate: true };
+  }
+  return { main: d.label, sub: `${d.time} PHT · JMA` };
 }
 
 // ---- drawing helpers -------------------------------------------------------
