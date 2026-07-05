@@ -1,5 +1,6 @@
 import { config } from './config.js';
 import { getTropicalCyclone } from './pagasa.js';
+import { getTyphoonWatch, typhoonWatchLine } from './typhoonWatch.js';
 
 /**
  * Open-Meteo client. No API key required.
@@ -103,6 +104,128 @@ export function isPhilippines(lat, lon) {
   return lat >= 4.5 && lat <= 21.5 && lon >= 116 && lon <= 127;
 }
 
+// Models we average. `best_match` is Open-Meteo's multi-source blend; GFS is
+// NOAA's global model (PAGASA's official 10-day forecast is GFS-based). Order
+// matters: the first model is the "primary" used for values we don't average
+// (sunrise/sunset). Add/remove models here to widen the blend.
+const BLEND_MODELS = ['best_match', 'gfs_seamless'];
+
+// Local daytime window used to pick a "representative" condition, so a brief
+// afternoon shower no longer labels an otherwise-sunny day as rainy.
+const DAY_START = 6; // 6 AM
+const DAY_END = 18; // 6 PM
+
+// Average numeric arrays element-wise, ignoring nulls/NaN.
+function avgArrays(arrays) {
+  const n = Math.max(0, ...arrays.map((a) => a?.length || 0));
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    let cnt = 0;
+    for (const a of arrays) {
+      const v = a?.[i];
+      if (v != null && !Number.isNaN(v)) {
+        sum += v;
+        cnt++;
+      }
+    }
+    out[i] = cnt ? sum / cnt : null;
+  }
+  return out;
+}
+
+// Per-model series for a base key, e.g. "temperature_2m_max" -> [best_match, gfs].
+const modelSeries = (obj, base) =>
+  BLEND_MODELS.map((m) => obj?.[`${base}_${m}`]).filter(Boolean);
+// First available model's series (or the unsuffixed key as a fallback).
+const primarySeries = (obj, base) => modelSeries(obj, base)[0] ?? obj?.[base];
+
+// Most frequent code in a list; ties break toward the milder (lower) code.
+function modeCode(codes) {
+  if (!codes.length) return null;
+  const counts = new Map();
+  for (const c of codes) counts.set(c, (counts.get(c) || 0) + 1);
+  let best = null;
+  let bestN = -1;
+  for (const [c, n] of counts) {
+    if (n > bestN || (n === bestN && c < best)) {
+      best = c;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
+// For each date, the daytime-representative rain % (mean over daytime hours,
+// across all models) and condition code (mode of daytime hourly codes).
+function daytimeByDate(hourly, dates) {
+  const times = hourly?.time || [];
+  const probArrays = modelSeries(hourly, 'precipitation_probability');
+  const codeArrays = modelSeries(hourly, 'weather_code');
+  const probs = {};
+  const codes = {};
+  for (const d of dates) {
+    probs[d] = [];
+    codes[d] = [];
+  }
+  for (let i = 0; i < times.length; i++) {
+    const [d, t] = times[i].split('T');
+    if (!(d in probs)) continue;
+    const hour = parseInt(t.slice(0, 2), 10);
+    if (hour < DAY_START || hour > DAY_END) continue;
+    for (const arr of probArrays) if (arr[i] != null) probs[d].push(arr[i]);
+    for (const arr of codeArrays) if (arr[i] != null) codes[d].push(arr[i]);
+  }
+  const prob = {};
+  const code = {};
+  for (const d of dates) {
+    const ps = probs[d];
+    prob[d] = ps.length ? Math.round(ps.reduce((a, b) => a + b, 0) / ps.length) : null;
+    code[d] = modeCode(codes[d]);
+  }
+  return { prob, code };
+}
+
+/**
+ * Collapse a multi-model Open-Meteo response back into the classic single-series
+ * shape the rest of this module expects, but with blended values:
+ *   - daily highs/lows/wind  -> averaged across models
+ *   - daily rain % + code    -> daytime-representative (mean %, modal code)
+ *   - hourly precipitation   -> averaged (drives rain slots + start/stop)
+ *   - sunrise/sunset         -> primary model (astronomical; model-independent)
+ *   - current                -> passthrough (Open-Meteo returns one nowcast)
+ */
+function blendModels(data) {
+  const d = data.daily;
+  const h = data.hourly;
+  if (!d || !h) return data; // nothing to blend (unexpected shape) — use as-is
+  const dates = d.time;
+  const day = daytimeByDate(h, dates);
+
+  const dailyProbFallback = avgArrays(modelSeries(d, 'precipitation_probability_max'));
+  const codeFallback = primarySeries(d, 'weather_code');
+
+  data.daily = {
+    time: dates,
+    temperature_2m_max: avgArrays(modelSeries(d, 'temperature_2m_max')),
+    temperature_2m_min: avgArrays(modelSeries(d, 'temperature_2m_min')),
+    wind_speed_10m_max: avgArrays(modelSeries(d, 'wind_speed_10m_max')),
+    sunrise: primarySeries(d, 'sunrise'),
+    sunset: primarySeries(d, 'sunset'),
+    precipitation_probability_max: dates.map(
+      (dt, i) => day.prob[dt] ?? Math.round(dailyProbFallback[i] ?? 0),
+    ),
+    weather_code: dates.map((dt, i) => day.code[dt] ?? codeFallback?.[i] ?? 0),
+  };
+
+  data.hourly = {
+    time: h.time,
+    precipitation: avgArrays(modelSeries(h, 'precipitation')),
+  };
+
+  return data;
+}
+
 export async function getForecast(loc, timezone = config.timezone) {
   const params = new URLSearchParams({
     latitude: String(loc.latitude),
@@ -110,22 +233,22 @@ export async function getForecast(loc, timezone = config.timezone) {
     current: 'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m',
     daily:
       'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,wind_speed_10m_max',
-    hourly: 'precipitation',
+    hourly: 'precipitation,precipitation_probability,weather_code',
     timezone,
     temperature_unit: config.units.temperature,
     wind_speed_unit: config.units.wind,
     // 13 days: today + the next 12. Also gives plenty of hourly data to find
     // the next rain start/stop even across midnight.
     forecast_days: '13',
+    // Blend two models: the multi-source `best_match` and GFS (PAGASA's 10-day
+    // basis). We average their highs/lows and pick a daytime-representative
+    // condition, which tracks apps like Google Weather far better than a single
+    // model's 24-hour rain maximum. See blendModels().
+    models: BLEND_MODELS.join(','),
   });
-  // For Philippine locations, use the GFS model — the same model PAGASA's
-  // official 10-day forecast is built on — so the numbers align with PAGASA.
-  if (isPhilippines(loc.latitude, loc.longitude)) {
-    params.set('models', 'gfs_seamless');
-  }
   const res = await fetch(`${FORECAST_URL}?${params.toString()}`);
   if (!res.ok) throw new Error(`Forecast failed: ${res.status} ${res.statusText}`);
-  const data = await res.json();
+  const data = blendModels(await res.json());
 
   const cur = data.current;
   const d = data.daily;
@@ -141,6 +264,7 @@ export async function getForecast(loc, timezone = config.timezone) {
       wind: cur.wind_speed_10m,
     },
     today: {
+      date: d.time[0],
       code: d.weather_code[0],
       tempMax: d.temperature_2m_max[0],
       tempMin: d.temperature_2m_min[0],
@@ -183,6 +307,13 @@ export async function getForecast(loc, timezone = config.timezone) {
       out.pagasa = await getTropicalCyclone();
     } catch {
       out.pagasa = null;
+    }
+    // Systems approaching PAR from the Western Pacific (GDACS) — surfaces a
+    // typhoon before PAGASA gives it a local name.
+    try {
+      out.typhoon = await getTyphoonWatch();
+    } catch {
+      out.typhoon = null;
     }
   }
   return out;
@@ -414,15 +545,24 @@ export function formatMessage(w, format = 'plain') {
           '',
         ]
       : [];
+  // Typhoon Watch: a system approaching PAR (or inside, if PAGASA hasn't named
+  // it yet). Skip when PAGASA already has an active named cyclone above.
+  const tw = w.typhoon;
+  const twLine =
+    tw && tw.active && (tw.status === 'approaching' || !(tc && tc.active))
+      ? typhoonWatchLine(tw)
+      : null;
+
   // Footer bits for PH: clear-status note + the GFS/PAGASA source line.
   const phFooter = [];
   if (tc && !tc.active) phFooter.push('🌀 PAGASA: No active tropical cyclone in PH');
-  if (w.gfsModel) phFooter.push('📡 Forecast model: GFS (PAGASA\'s 10-day basis)');
+  if (w.gfsModel) phFooter.push('📡 Forecast: GFS + global blend, averaged (GFS = PAGASA\'s 10-day basis)');
 
   const lines = [
     `${cur.emoji} Weather for ${w.location.name}`,
     '',
     ...tcAlert,
+    ...(twLine ? [twLine, ''] : []),
     `${cur.emoji} Now: ${Math.round(w.current.temp)}${t} (feels ${Math.round(w.current.feelsLike)}${t}) — ${cur.label}`,
     `${today.emoji} Today: ${today.label}`,
     `🌡️ High ${Math.round(w.today.tempMax)}${t} / Low ${Math.round(w.today.tempMin)}${t}`,

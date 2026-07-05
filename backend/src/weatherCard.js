@@ -235,9 +235,9 @@ export async function renderWeatherCard(w) {
   ctx.lineTo(W - 56, 372);
   ctx.stroke();
 
-  // 6-day row — with the driest day (lowest rain chance) highlighted.
-  const days = (w.days || []).slice(0, 6);
-  const colW = (W - 112) / 6;
+  // Day row — today first, then the next 6 — with the driest day highlighted.
+  const days = [w.today, ...(w.days || [])].slice(0, 7);
+  const colW = (W - 112) / days.length;
   let driestIdx = 0;
   for (let i = 1; i < days.length; i++) {
     if ((days[i].precipProb ?? 101) < (days[driestIdx].precipProb ?? 101)) driestIdx = i;
@@ -265,7 +265,7 @@ export async function renderWeatherCard(w) {
     }
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
     ctx.font = '30px RobotoBold';
-    ctx.fillText(dayAbbr(d.date), cx, 410);
+    ctx.fillText(i === 0 ? 'Today' : dayAbbr(d.date), cx, 410);
     glyph(ctx, d.code, cx, 480, 44);
     ctx.fillStyle = R;
     ctx.font = '30px RobotoBold';

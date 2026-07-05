@@ -77,10 +77,17 @@ async function sendForecastFor(chatId, loc) {
   await telegram.sendText(chatId, text, {
     reply_markup: { remove_keyboard: true },
   });
-  // Image card at the end of the message.
-  const card = await telegram.safeCard(weather);
+  // Image card at the end of the message (rich postcard when available).
+  const card = await telegram.safeDailyCard(weather);
   if (card) {
     await telegram.sendPhoto(chatId, card).catch((e) => console.error('[telegram card]', e.message));
+  }
+  // Typhoon postcard when a system is inside/approaching PAR.
+  const typhoonCard = await telegram.safeTyphoonCard(weather);
+  if (typhoonCard) {
+    await telegram
+      .sendPhoto(chatId, typhoonCard, `Typhoon Watch · ${weather.typhoon.category} ${weather.typhoon.name} · source GDACS`)
+      .catch((e) => console.error('[telegram typhoon card]', e.message));
   }
 }
 

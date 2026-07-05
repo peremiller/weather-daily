@@ -1,7 +1,9 @@
 import { config } from '../config.js';
 import { formatMessage } from '../weather.js';
 import { renderWeatherCard } from '../weatherCard.js';
-import { pagasaTenDayPanel } from '../pagasaTenDay.js';
+import { renderTyphoonCard } from '../typhoonCard.js';
+import { renderPostcardPNG } from '../dailyPostcard.js';
+import { pagasaTenDayPanel, getPagasaTenDay } from '../pagasaTenDay.js';
 
 /**
  * Telegram Bot API integration.
@@ -36,7 +38,8 @@ export async function sendDaily(weather) {
   } catch {
     /* skip panel on error */
   }
-  const card = await safeCard(weather);
+  const card = await safeDailyCard(weather);
+  const typhoonCard = await safeTyphoonCard(weather);
   const results = [];
   for (const chatId of config.telegram.chatIds) {
     try {
@@ -47,6 +50,11 @@ export async function sendDaily(weather) {
         disable_web_page_preview: true,
       });
       if (card) await sendPhoto(chatId, card).catch((e) => console.error('[telegram card]', e.message));
+      // A typhoon postcard when a system is inside/approaching PAR.
+      if (typhoonCard) {
+        await sendPhoto(chatId, typhoonCard, `Typhoon Watch · ${weather.typhoon.category} ${weather.typhoon.name} · source GDACS`)
+          .catch((e) => console.error('[telegram typhoon card]', e.message));
+      }
       results.push({ chatId, ok: true });
     } catch (err) {
       results.push({ chatId, ok: false, error: err.message });
@@ -69,6 +77,44 @@ export async function safeCard(weather) {
     return await renderWeatherCard(weather);
   } catch (err) {
     console.error('[telegram] card render failed:', err.message);
+    return null;
+  }
+}
+
+/**
+ * The daily forecast image: prefer the rich HTML "postcard" (needs Chrome — set
+ * CHROME_PATH; installed in the Docker image), and fall back to the lightweight
+ * canvas card wherever no browser is available. Always returns a PNG buffer (or
+ * null only if both fail).
+ */
+export async function safeDailyCard(weather) {
+  try {
+    let tenday = null;
+    if (weather.gfsModel && weather.location) {
+      // PH only: attach PAGASA's official TenDay panel (best-effort, cached).
+      tenday = await getPagasaTenDay(
+        weather.location.latitude,
+        weather.location.longitude,
+      ).catch(() => null);
+    }
+    const postcard = await renderPostcardPNG(weather, tenday);
+    if (postcard) return postcard;
+  } catch (err) {
+    console.error('[telegram] postcard render failed:', err.message);
+  }
+  return safeCard(weather); // graceful fallback
+}
+
+/**
+ * Render the typhoon postcard when a system is inside/approaching PAR — else
+ * null. Never throws (a render failure just skips the postcard).
+ */
+export async function safeTyphoonCard(weather) {
+  if (!weather.typhoon || !weather.typhoon.active) return null;
+  try {
+    return await renderTyphoonCard(weather.typhoon);
+  } catch (err) {
+    console.error('[telegram] typhoon card render failed:', err.message);
     return null;
   }
 }
