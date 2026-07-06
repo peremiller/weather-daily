@@ -315,7 +315,8 @@ export async function renderTyphoonCard(t, opts = {}) {
       const titleH = 26;
       const boxW = rangeX + rangeW + 16;
       const boxH = titleH + order.length * rowH + 10;
-      const bx = px + 16;
+      // Right side (bottom-right), so it never covers the Philippine map (left).
+      const bx = px + pw - boxW - 16;
       const by = py + ph - boxH - 14;
       roundRect(ctx, bx, by, boxW, boxH, 10);
       ctx.fillStyle = 'rgba(8,20,30,0.85)';
