@@ -56,6 +56,13 @@ const alertColor = (a) =>
 // Intensity-category colours (PAGASA scale) for track markers + legend.
 const CAT_COLOR = { STY: '#e53935', TY: '#fb8c00', STS: '#fdd835', TS: '#43a047', TD: '#42a5f5' };
 const CAT_LABEL = { TD: 'TD', TS: 'TS', STS: 'STS', TY: 'TY', STY: 'STY' };
+const CAT_FULL = {
+  TD: 'Tropical Depression',
+  TS: 'Tropical Storm',
+  STS: 'Severe Tropical Storm',
+  TY: 'Typhoon',
+  STY: 'Super Typhoon',
+};
 
 const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 function dateLabel(d = new Date()) {
@@ -279,31 +286,46 @@ export async function renderTyphoonCard(t, opts = {}) {
     cyclone(ctx, c0.x, c0.y, gr(2.0), ac);
     tag(ctx, nameTag, c0.x - gr(1.5), c0.y + gr(2.0) + 26, ac);
 
-    // "Forecast Intensity" legend (bottom-left), only when winds are available
+    // "Forecast Intensity" key (bottom-left): colour · abbreviation · full name,
+    // so the TD/TS/STS/TY/STY acronyms are spelled out on the image.
     if (hasWinds) {
       const order = ['TD', 'TS', 'STS', 'TY', 'STY'];
       ctx.save();
-      ctx.font = '18px RobotoBold';
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'left';
-      const items = order.map((c) => ({ c, w: 22 + ctx.measureText(CAT_LABEL[c]).width }));
-      const totalW = items.reduce((s, it) => s + it.w + 14, 0) + 10;
-      const lx0 = px + 18, ly0 = py + ph - 46, lh = 34;
-      roundRect(ctx, lx0, ly0, totalW, lh, 9);
-      ctx.fillStyle = 'rgba(8,20,30,0.78)';
+      ctx.font = '18px Roboto';
+      let nameW = 0;
+      for (const c of order) nameW = Math.max(nameW, ctx.measureText(CAT_FULL[c]).width);
+      const abbrX = 34; // relative to box left
+      const nameX = 82;
+      const rowH = 27;
+      const titleH = 26;
+      const boxW = nameX + nameW + 16;
+      const boxH = titleH + order.length * rowH + 10;
+      const bx = px + 16;
+      const by = py + ph - boxH - 14;
+      roundRect(ctx, bx, by, boxW, boxH, 10);
+      ctx.fillStyle = 'rgba(8,20,30,0.85)';
       ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,0.15)';
       ctx.lineWidth = 1;
       ctx.stroke();
-      let cx = lx0 + 12;
-      for (const it of items) {
+      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.font = '15px RobotoBold';
+      ctx.fillText('FORECAST INTENSITY', bx + 14, by + 16);
+      let ry = by + titleH + rowH / 2;
+      for (const c of order) {
         ctx.beginPath();
-        ctx.arc(cx + 7, ly0 + lh / 2, 7, 0, Math.PI * 2);
-        ctx.fillStyle = CAT_COLOR[it.c];
+        ctx.arc(bx + 20, ry, 6, 0, Math.PI * 2);
+        ctx.fillStyle = CAT_COLOR[c];
         ctx.fill();
-        ctx.fillStyle = 'rgba(255,255,255,0.88)';
-        ctx.fillText(CAT_LABEL[it.c], cx + 20, ly0 + lh / 2 + 1);
-        cx += it.w + 14;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '18px RobotoBold';
+        ctx.fillText(c, bx + abbrX, ry + 1);
+        ctx.fillStyle = 'rgba(255,255,255,0.82)';
+        ctx.font = '18px Roboto';
+        ctx.fillText(CAT_FULL[c], bx + nameX, ry + 1);
+        ry += rowH;
       }
       ctx.restore();
     }
