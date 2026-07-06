@@ -63,6 +63,14 @@ const CAT_FULL = {
   TY: 'Typhoon',
   STY: 'Super Typhoon',
 };
+// PAGASA wind-speed bands (10-min max sustained). ASCII only (font-safe).
+const CAT_RANGE = {
+  TD: 'up to 61 km/h',
+  TS: '62-88 km/h',
+  STS: '89-117 km/h',
+  TY: '118-184 km/h',
+  STY: '185+ km/h',
+};
 
 const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 function dateLabel(d = new Date()) {
@@ -286,8 +294,8 @@ export async function renderTyphoonCard(t, opts = {}) {
     cyclone(ctx, c0.x, c0.y, gr(2.0), ac);
     tag(ctx, nameTag, c0.x - gr(1.5), c0.y + gr(2.0) + 26, ac);
 
-    // "Forecast Intensity" key (bottom-left): colour · abbreviation · full name,
-    // so the TD/TS/STS/TY/STY acronyms are spelled out on the image.
+    // "Forecast Intensity" key (bottom-left): colour · abbreviation · full name
+    // · PAGASA wind band, so the TD/TS/STS/TY/STY acronyms + speeds are on-image.
     if (hasWinds) {
       const order = ['TD', 'TS', 'STS', 'TY', 'STY'];
       ctx.save();
@@ -295,12 +303,17 @@ export async function renderTyphoonCard(t, opts = {}) {
       ctx.textAlign = 'left';
       ctx.font = '18px Roboto';
       let nameW = 0;
-      for (const c of order) nameW = Math.max(nameW, ctx.measureText(CAT_FULL[c]).width);
+      let rangeW = 0;
+      for (const c of order) {
+        nameW = Math.max(nameW, ctx.measureText(CAT_FULL[c]).width);
+        rangeW = Math.max(rangeW, ctx.measureText(CAT_RANGE[c]).width);
+      }
       const abbrX = 34; // relative to box left
       const nameX = 82;
+      const rangeX = nameX + nameW + 22;
       const rowH = 27;
       const titleH = 26;
-      const boxW = nameX + nameW + 16;
+      const boxW = rangeX + rangeW + 16;
       const boxH = titleH + order.length * rowH + 10;
       const bx = px + 16;
       const by = py + ph - boxH - 14;
@@ -325,6 +338,9 @@ export async function renderTyphoonCard(t, opts = {}) {
         ctx.fillStyle = 'rgba(255,255,255,0.82)';
         ctx.font = '18px Roboto';
         ctx.fillText(CAT_FULL[c], bx + nameX, ry + 1);
+        ctx.fillStyle = CAT_COLOR[c];
+        ctx.font = '17px RobotoBold';
+        ctx.fillText(CAT_RANGE[c], bx + rangeX, ry + 1);
         ry += rowH;
       }
       ctx.restore();
