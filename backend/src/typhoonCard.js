@@ -262,7 +262,7 @@ export async function renderTyphoonCard(t, opts = {}) {
       const vOff = k % 2 === 0 ? -40 : 40;
       trackLabel(
         ctx, p.x, p.y,
-        d.label.replace(/^\w+ /, '').toUpperCase(),
+        d.label.toUpperCase(), // include the weekday, e.g. "WED JUL 8"
         d.time,
         p.windKph != null ? `${p.windKph} km/h` : null,
         col, left, vOff,
