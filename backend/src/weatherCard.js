@@ -157,14 +157,14 @@ export async function renderWeatherCard(w) {
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
 
-  // rounded card with gradient
+  // Full-bleed gradient background (opaque to every corner) — a rounded card
+  // left transparent corners that some chat apps composite to white.
   const [c0, c1] = gradientFor(w.current.code);
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, c0);
   g.addColorStop(1, c1);
   ctx.fillStyle = g;
-  roundRect(ctx, 0, 0, W, H, 36);
-  ctx.fill();
+  ctx.fillRect(0, 0, W, H);
 
   // PAGASA tropical-cyclone alert strip across the top (only when active).
   if (alert) drawAlertBanner(ctx, w.pagasa, bannerH);

@@ -68,7 +68,14 @@ async function jmaTrack(intlName) {
       const c = part.center; // [lat, lon]
       const utc = part.validtime?.UTC;
       if (Array.isArray(c) && utc && part.advancedHours != null) {
-        track.push({ ms: Date.parse(utc), lat: c[0], lon: c[1], ah: part.advancedHours });
+        track.push({
+          ms: Date.parse(utc),
+          lat: c[0],
+          lon: c[1],
+          ah: part.advancedHours,
+          // forecast-uncertainty circle radius (metres) — powers the cone.
+          radiusM: part.probabilityCircle?.radius ?? null,
+        });
       }
     }
     track.sort((a, b) => a.ah - b.ah);
@@ -128,7 +135,13 @@ export async function getParTiming(intlName) {
     if (res && res.track.length >= 2) {
       const { entry, exit } = crossings(res.track);
       if (entry || exit) {
-        value = { source: 'JMA (RSMC Tokyo)', issued: res.issued, entry, exit };
+        value = {
+          source: 'JMA (RSMC Tokyo)',
+          issued: res.issued,
+          entry,
+          exit,
+          track: res.track, // full forecast track for the map (positions + radii)
+        };
       }
     }
   } catch (err) {

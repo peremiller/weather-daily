@@ -1,5 +1,6 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 /**
  * Typhoon "postcard" — a bold, share-ready forecast card for a tropical cyclone
@@ -29,20 +30,25 @@ const H = 1480; // taller to fit the PAR entry/exit band
 
 // Geographic window the map panel spans (lon/lat). Includes PH (~120°E) and the
 // Western Pacific approach corridor (~150°E).
-const GEO = { lonMin: 112, lonMax: 150, latMin: -2, latMax: 30 };
+const GEO = { lonMin: 112, lonMax: 150, latMin: 3, latMax: 27 };
 
 // PAR polygon (lon, lat) — PAGASA's official boundary.
 const PAR = [
   [120, 25], [135, 25], [135, 5], [115, 5], [115, 15], [120, 21], [120, 25],
 ];
 
-// Very rough Philippine landmass blobs (lon, lat, radius°) — stylised, just
-// enough to read as "the Philippines", not a survey map.
-const PH_BLOBS = [
-  [121.0, 17.0, 2.2], [121.3, 15.0, 2.0], [120.9, 13.3, 1.6], // Luzon
-  [123.6, 11.0, 1.7], [125.0, 11.4, 1.1],                     // Visayas
-  [124.8, 8.0, 2.1], [125.4, 6.6, 1.6],                       // Mindanao
-];
+// Real coastlines (simplified Natural Earth 50m outlines), loaded once. Each is
+// an array of rings; each ring an array of [lon, lat]. Falls back to [] if the
+// data file is missing (map just omits that land).
+const loadOutline = (name) => {
+  try {
+    return JSON.parse(readFileSync(join(__dirname, 'geo', name), 'utf8'));
+  } catch {
+    return [];
+  }
+};
+const PH_OUTLINE = loadOutline('philippinesOutline.json');
+const TW_OUTLINE = loadOutline('taiwanOutline.json');
 
 const alertColor = (a) =>
   a === 'Red' ? '#e53935' : a === 'Orange' ? '#fb8c00' : '#43a047';
@@ -122,10 +128,19 @@ export async function renderTyphoonCard(t, opts = {}) {
   ctx.fillStyle = ocean;
   ctx.fillRect(px, py, pw, ph);
 
-  // map coords helpers (north up)
-  const gx = (lon) => px + ((lon - GEO.lonMin) / (GEO.lonMax - GEO.lonMin)) * pw;
-  const gy = (lat) => py + ((GEO.latMax - lat) / (GEO.latMax - GEO.latMin)) * ph;
-  const gr = (deg) => (deg / (GEO.lonMax - GEO.lonMin)) * pw; // ° -> px (x scale)
+  // Equal-aspect (cos-latitude) projection so the PAR / PH / storm keep TRUE
+  // geographic proportions. A plain lon/lat stretch made 1° of longitude wider
+  // than 1° of latitude, distorting the (roughly square) PAR into a wide box.
+  const midLat = (GEO.latMin + GEO.latMax) / 2;
+  const cosLat = Math.cos((midLat * Math.PI) / 180);
+  const lonSpanEq = (GEO.lonMax - GEO.lonMin) * cosLat;
+  const latSpan = GEO.latMax - GEO.latMin;
+  const scale = Math.min(pw / lonSpanEq, ph / latSpan); // px per degree of latitude
+  const ox = px + (pw - lonSpanEq * scale) / 2; // centre the map in the panel
+  const oy = py + (ph - latSpan * scale) / 2;
+  const gx = (lon) => ox + (lon - GEO.lonMin) * cosLat * scale;
+  const gy = (lat) => oy + (GEO.latMax - lat) * scale; // north up
+  const gr = (deg) => deg * cosLat * scale; // ° -> px in the x direction
 
   // faint lat/lon grid
   ctx.strokeStyle = 'rgba(255,255,255,0.06)';
@@ -137,23 +152,36 @@ export async function renderTyphoonCard(t, opts = {}) {
     ctx.beginPath(); ctx.moveTo(px, gy(lat)); ctx.lineTo(px + pw, gy(lat)); ctx.stroke();
   }
 
-  // Philippines landmass (stylised blobs)
-  ctx.fillStyle = 'rgba(120,170,140,0.9)';
-  ctx.beginPath();
-  for (const [lon, lat, rad] of PH_BLOBS) {
-    ctx.moveTo(gx(lon) + gr(rad), gy(lat));
-    ctx.arc(gx(lon), gy(lat), gr(rad), 0, Math.PI * 2);
+  // Real coastlines — Philippines + Taiwan (northern context, where it recurves)
+  for (const outline of [PH_OUTLINE, TW_OUTLINE]) {
+    ctx.fillStyle = '#6f9e78';
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 1.5;
+    for (const ring of outline) {
+      ctx.beginPath();
+      ring.forEach(([lon, lat], i) => {
+        const X = gx(lon), Y = gy(lat);
+        i === 0 ? ctx.moveTo(X, Y) : ctx.lineTo(X, Y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
   }
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.font = '26px RobotoBold';
+  // land labels
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  ctx.font = '22px RobotoBold';
   ctx.save();
-  ctx.translate(gx(122.2), gy(12.2));
-  ctx.rotate(-Math.PI / 2.6);
+  ctx.translate(gx(121.2), gy(12.5));
+  ctx.rotate(-Math.PI / 2.3);
   ctx.fillText('PHILIPPINES', 0, 0);
   ctx.restore();
+  if (TW_OUTLINE.length) {
+    ctx.font = '18px RobotoBold';
+    ctx.fillText('TAIWAN', gx(121), gy(23.6));
+  }
 
   // PAR boundary (dashed)
   ctx.strokeStyle = 'rgba(255,255,255,0.55)';
@@ -172,27 +200,75 @@ export async function renderTyphoonCard(t, opts = {}) {
   ctx.textAlign = 'left';
   ctx.fillText('PAR', gx(133.4), gy(23));
 
-  // storm position (clamp so the full swirl stays inside the panel)
-  const sLon = Math.min(t.lon, GEO.lonMax - 6.5);
-  const scx = gx(sLon), scy = gy(t.lat);
+  const nameTag = t.localName ? `${t.catAbbr} ${t.name} · ${t.localName}` : `${t.catAbbr} ${t.name}`;
+  const track = t.timing && t.timing.track;
 
-  // forecast motion arrow: storm -> WNW toward PAR (dashed)
-  if (approaching) {
-    ctx.strokeStyle = 'rgba(255,220,120,0.9)';
-    ctx.lineWidth = 5;
-    ctx.setLineDash([16, 12]);
-    const tx = gx(132), ty = gy(t.lat + 2.5);
-    ctx.beginPath(); ctx.moveTo(scx, scy); ctx.lineTo(tx, ty); ctx.stroke();
+  if (track && track.length >= 2) {
+    // ---- JMA forecast track (ScienceKonek-style) ----
+    const pts = track.map((p) => ({ ...p, x: gx(p.lon), y: gy(p.lat) }));
+
+    // forecast cone: JMA uncertainty circles (metres -> px), soft red swath
+    ctx.save();
+    ctx.fillStyle = 'rgba(229,80,57,0.15)';
+    for (const p of pts) {
+      if (p.radiusM) {
+        const rpx = (p.radiusM / 111000) * scale;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rpx, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    // track line through the forecast positions
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([12, 9]);
+    ctx.beginPath();
+    pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.stroke();
     ctx.setLineDash([]);
-    arrowHead(ctx, tx, ty, Math.atan2(ty - scy, tx - scx), 'rgba(255,220,120,0.95)');
+    ctx.restore();
+
+    // dated markers at each forecast position (i=0 is the current analysis)
+    pts.forEach((p, i) => {
+      if (i === 0) return;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = ac;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      const d = pht(p.ms);
+      // narrow 2-line pills, placed clear of the storm symbol and staggered
+      // up/down so neighbouring dates don't collide.
+      const left = p.lon >= 139;
+      const vOff = i % 2 === 0 ? 30 : -30;
+      trackLabel(ctx, p.x, p.y, d.label.replace(/^\w+ /, '').toUpperCase(), d.time, left, vOff);
+    });
+
+    // current position — the cyclone symbol + name tag (below-left, clear of labels)
+    const c0 = pts[0];
+    cyclone(ctx, c0.x, c0.y, gr(2.0), ac);
+    tag(ctx, nameTag, c0.x - gr(1.5), c0.y + gr(2.0) + 26, ac);
+  } else {
+    // ---- no official track: simple swirl + motion arrow ----
+    const sLon = Math.min(t.lon, GEO.lonMax - 6.5);
+    const scx = gx(sLon), scy = gy(t.lat);
+    if (approaching) {
+      ctx.strokeStyle = 'rgba(255,220,120,0.9)';
+      ctx.lineWidth = 5;
+      ctx.setLineDash([16, 12]);
+      const tx = gx(132), ty = gy(t.lat + 2.5);
+      ctx.beginPath(); ctx.moveTo(scx, scy); ctx.lineTo(tx, ty); ctx.stroke();
+      ctx.setLineDash([]);
+      arrowHead(ctx, tx, ty, Math.atan2(ty - scy, tx - scx), 'rgba(255,220,120,0.95)');
+    }
+    cyclone(ctx, scx, scy, gr(6), ac);
+    tag(ctx, nameTag, scx, scy + gr(6) + 26, ac);
   }
-
-  // the cyclone swirl
-  cyclone(ctx, scx, scy, gr(6), ac);
-
-  // storm name tag on the map (int'l name + expected PH name)
-  tag(ctx, t.localName ? `${t.catAbbr} ${t.name} · ${t.localName}` : `${t.catAbbr} ${t.name}`,
-    scx, scy + gr(6) + 26, ac);
 
   ctx.restore(); // end panel clip
 
@@ -354,6 +430,40 @@ function cyclone(ctx, cx, cy, r, tint = '#e53935') {
   ctx.beginPath(); ctx.arc(0, 0, r * 0.22, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = tint;
   ctx.beginPath(); ctx.arc(0, 0, r * 0.1, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// Narrow 2-line pill (DATE over time) beside a track marker, with a short
+// leader line. `left` places it to the marker's left (used near the storm),
+// `vOff` nudges it up/down so neighbouring dates don't collide.
+function trackLabel(ctx, x, y, dateStr, timeStr, left = false, vOff = 30) {
+  ctx.save();
+  ctx.font = '18px RobotoBold';
+  const w = Math.max(ctx.measureText(dateStr).width, ctx.measureText(timeStr).width) + 18;
+  const h = 44;
+  const lx = left ? x - 12 - w : x + 12;
+  const ly = y + vOff - h / 2;
+  // leader from marker to pill
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(left ? lx + w : lx, ly + h / 2);
+  ctx.stroke();
+  roundRect(ctx, lx, ly, w, h, 8);
+  ctx.fillStyle = 'rgba(10,22,34,0.85)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffe08a';
+  ctx.font = '18px RobotoBold';
+  ctx.fillText(dateStr, lx + w / 2, ly + 14);
+  ctx.fillStyle = 'rgba(255,255,255,0.78)';
+  ctx.font = '16px Roboto';
+  ctx.fillText(timeStr, lx + w / 2, ly + 31);
   ctx.restore();
 }
 
