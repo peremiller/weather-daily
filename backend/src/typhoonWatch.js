@@ -132,7 +132,9 @@ export async function getTyphoonWatch() {
     if (value.active) {
       try {
         value.timing =
-          (await getParTiming(value.name)) || estimateParEntry(value) || null;
+          (await getParTiming(value.name, value.lat, value.lon)) ||
+          estimateParEntry(value) ||
+          null;
       } catch {
         value.timing = estimateParEntry(value) || null;
       }

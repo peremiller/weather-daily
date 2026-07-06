@@ -53,6 +53,10 @@ const TW_OUTLINE = loadOutline('taiwanOutline.json');
 const alertColor = (a) =>
   a === 'Red' ? '#e53935' : a === 'Orange' ? '#fb8c00' : '#43a047';
 
+// Intensity-category colours (PAGASA scale) for track markers + legend.
+const CAT_COLOR = { STY: '#e53935', TY: '#fb8c00', STS: '#fdd835', TS: '#43a047', TD: '#42a5f5' };
+const CAT_LABEL = { TD: 'TD', TS: 'TS', STS: 'STS', TY: 'TY', STY: 'STY' };
+
 const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 function dateLabel(d = new Date()) {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
@@ -231,28 +235,73 @@ export async function renderTyphoonCard(t, opts = {}) {
     ctx.setLineDash([]);
     ctx.restore();
 
-    // dated markers at each forecast position (i=0 is the current analysis)
+    // dated markers at each forecast position (i=0 is the current analysis).
+    // Markers are colour-coded by intensity category; pills add the max wind
+    // when JTWC winds are available.
+    const hasWinds = pts.some((p) => p.windKph != null);
+    // A dot at EVERY forecast point, but a label only on a spaced subset (every
+    // other point + the last) so the denser JTWC track doesn't collide.
+    let li = 0;
     pts.forEach((p, i) => {
       if (i === 0) return;
+      const col = CAT_COLOR[p.cat] || '#ffffff';
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
-      ctx.fillStyle = '#ffffff';
+      ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = col;
       ctx.fill();
-      ctx.strokeStyle = ac;
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
       ctx.stroke();
+      const labelThis = i % 2 === 0 || i === pts.length - 1;
+      if (!labelThis) return;
       const d = pht(p.ms);
-      // narrow 2-line pills, placed clear of the storm symbol and staggered
-      // up/down so neighbouring dates don't collide.
-      const left = p.lon >= 139;
-      const vOff = i % 2 === 0 ? 30 : -30;
-      trackLabel(ctx, p.x, p.y, d.label.replace(/^\w+ /, '').toUpperCase(), d.time, left, vOff);
+      // Alternate labels to opposite corners so neighbours don't stack; points
+      // very near the storm are forced left to clear the swirl.
+      const k = li++;
+      const left = p.lon >= 143 ? true : k % 2 === 1;
+      const vOff = k % 2 === 0 ? -40 : 40;
+      trackLabel(
+        ctx, p.x, p.y,
+        d.label.replace(/^\w+ /, '').toUpperCase(),
+        d.time,
+        p.windKph != null ? `${p.windKph} km/h` : null,
+        col, left, vOff,
+      );
     });
 
     // current position — the cyclone symbol + name tag (below-left, clear of labels)
     const c0 = pts[0];
     cyclone(ctx, c0.x, c0.y, gr(2.0), ac);
     tag(ctx, nameTag, c0.x - gr(1.5), c0.y + gr(2.0) + 26, ac);
+
+    // "Forecast Intensity" legend (bottom-left), only when winds are available
+    if (hasWinds) {
+      const order = ['TD', 'TS', 'STS', 'TY', 'STY'];
+      ctx.save();
+      ctx.font = '18px RobotoBold';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      const items = order.map((c) => ({ c, w: 22 + ctx.measureText(CAT_LABEL[c]).width }));
+      const totalW = items.reduce((s, it) => s + it.w + 14, 0) + 10;
+      const lx0 = px + 18, ly0 = py + ph - 46, lh = 34;
+      roundRect(ctx, lx0, ly0, totalW, lh, 9);
+      ctx.fillStyle = 'rgba(8,20,30,0.78)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      let cx = lx0 + 12;
+      for (const it of items) {
+        ctx.beginPath();
+        ctx.arc(cx + 7, ly0 + lh / 2, 7, 0, Math.PI * 2);
+        ctx.fillStyle = CAT_COLOR[it.c];
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.88)';
+        ctx.fillText(CAT_LABEL[it.c], cx + 20, ly0 + lh / 2 + 1);
+        cx += it.w + 14;
+      }
+      ctx.restore();
+    }
   } else {
     // ---- no official track: simple swirl + motion arrow ----
     const sLon = Math.min(t.lon, GEO.lonMax - 6.5);
@@ -352,11 +401,13 @@ export async function renderTyphoonCard(t, opts = {}) {
   ctx.fillText(`FORECAST · ${opts.date || dateLabel()}`, 40, stripY + 34);
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '24px Roboto';
-  const src = t.timing?.source === 'JMA (RSMC Tokyo)'
-    ? 'Source: GDACS + JMA forecast · Follow official PAGASA bulletins'
-    : t.timing?.source === 'estimate'
-      ? 'Entry estimated · Source: GDACS · Follow official PAGASA bulletins'
-      : 'Source: GDACS · Follow official PAGASA bulletins';
+  const src = t.timing?.source === 'JTWC'
+    ? 'Source: GDACS · track & winds JTWC/JMA · Follow official PAGASA bulletins'
+    : t.timing?.source === 'JMA (RSMC Tokyo)'
+      ? 'Source: GDACS + JMA forecast · Follow official PAGASA bulletins'
+      : t.timing?.source === 'estimate'
+        ? 'Entry estimated · Source: GDACS · Follow official PAGASA bulletins'
+        : 'Source: GDACS · Follow official PAGASA bulletins';
   ctx.fillText(src, 40, stripY + 68);
   ctx.textAlign = 'right';
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
@@ -391,7 +442,8 @@ function fmtTiming(timing, which) {
   if (isEst) {
     return { main: `~${d.label}`, sub: `est. · assumed ${timing.assumedKmh || 20} km/h`, estimate: true };
   }
-  return { main: d.label, sub: `${d.time} PHT · JMA` };
+  const srcAbbr = seg.src || (timing.source === 'JTWC' ? 'JTWC' : timing.source && timing.source.startsWith('JMA') ? 'JMA' : 'fcst');
+  return { main: d.label, sub: `${d.time} PHT · ${srcAbbr}` };
 }
 
 // ---- drawing helpers -------------------------------------------------------
@@ -433,14 +485,19 @@ function cyclone(ctx, cx, cy, r, tint = '#e53935') {
   ctx.restore();
 }
 
-// Narrow 2-line pill (DATE over time) beside a track marker, with a short
-// leader line. `left` places it to the marker's left (used near the storm),
-// `vOff` nudges it up/down so neighbouring dates don't collide.
-function trackLabel(ctx, x, y, dateStr, timeStr, left = false, vOff = 30) {
+// Compact pill (DATE / time / wind) beside a track marker, with a leader line.
+// `windStr` (optional) is drawn in the marker's category colour. `left` places
+// it to the marker's left (near the storm); `vOff` de-overlaps neighbours.
+function trackLabel(ctx, x, y, dateStr, timeStr, windStr, catColor, left = false, vOff = 34) {
   ctx.save();
   ctx.font = '18px RobotoBold';
-  const w = Math.max(ctx.measureText(dateStr).width, ctx.measureText(timeStr).width) + 18;
-  const h = 44;
+  const w =
+    Math.max(
+      ctx.measureText(dateStr).width,
+      ctx.measureText(timeStr).width,
+      windStr ? ctx.measureText(windStr).width : 0,
+    ) + 18;
+  const h = windStr ? 60 : 44;
   const lx = left ? x - 12 - w : x + 12;
   const ly = y + vOff - h / 2;
   // leader from marker to pill
@@ -464,6 +521,11 @@ function trackLabel(ctx, x, y, dateStr, timeStr, left = false, vOff = 30) {
   ctx.fillStyle = 'rgba(255,255,255,0.78)';
   ctx.font = '16px Roboto';
   ctx.fillText(timeStr, lx + w / 2, ly + 31);
+  if (windStr) {
+    ctx.fillStyle = catColor || '#fff';
+    ctx.font = '17px RobotoBold';
+    ctx.fillText(windStr, lx + w / 2, ly + 48);
+  }
   ctx.restore();
 }
 

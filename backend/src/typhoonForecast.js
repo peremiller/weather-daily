@@ -18,6 +18,13 @@
 const JMA_LIST = 'https://www.jma.go.jp/bosai/typhoon/data/targetTc.json';
 const jmaForecastUrl = (tc) =>
   `https://www.jma.go.jp/bosai/typhoon/data/${tc}/forecast.json`;
+// JTWC warning text (has forecast positions WITH max winds). We resolve the WPnn
+// storm number by matching the current position against the open ATCF best-track
+// (b-deck) files mirrored at UCAR RAL.
+const jtwcWarningUrl = (nn, yy) =>
+  `https://www.metoc.navy.mil/jtwc/products/wp${nn}${yy}web.txt`;
+const ucarBdeckDir = (yr) =>
+  `https://hurricanes.ral.ucar.edu/repository/data/bdecks_open/${yr}/`;
 const UA = 'Mozilla/5.0 (weather-daily typhoon-forecast)';
 const CACHE_TTL_MS = 30 * 60 * 1000;
 
@@ -43,6 +50,108 @@ async function fetchJson(url) {
   const res = await fetch(url, { headers: { 'User-Agent': UA } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
+}
+async function fetchText(url) {
+  const res = await fetch(url, { headers: { 'User-Agent': UA } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
+
+// PAGASA-scale category from a 1-min max sustained wind (knots).
+function categoryKt(kt) {
+  if (kt == null) return null;
+  if (kt >= 100) return 'STY'; // Super Typhoon (~>=185 km/h)
+  if (kt >= 64) return 'TY';
+  if (kt >= 48) return 'STS';
+  if (kt >= 34) return 'TS';
+  return 'TD';
+}
+
+// ATCF lat/lon tokens are tenths of a degree with a hemisphere suffix:
+// "137N" -> 13.7, "1461E" -> 146.1.
+function atcfDeg(tok) {
+  const m = /^(\d+)([NSEW])$/.exec(String(tok).trim());
+  if (!m) return null;
+  let v = parseInt(m[1], 10) / 10;
+  if (m[2] === 'S' || m[2] === 'W') v = -v;
+  return v;
+}
+
+/**
+ * Resolve the JTWC WPnn number for the storm nearest (lat, lon) by scanning the
+ * open ATCF best-track files. Returns { nn, yy, anchor } where anchor is the
+ * b-deck's latest YYYYMMDDHH (used to date the DDHHMM-only warning stamps).
+ */
+async function resolveJtwc(lat, lon) {
+  const yr = new Date().getUTCFullYear();
+  const dir = await fetchText(ucarBdeckDir(yr));
+  const nums = [
+    ...new Set([...dir.matchAll(new RegExp(`bwp(\\d\\d)${yr}\\.dat`, 'g'))].map((m) => m[1])),
+  ].filter((n) => parseInt(n, 10) < 80); // skip 90-99 invests
+  let best = null;
+  for (const nn of nums) {
+    try {
+      const b = await fetchText(`${ucarBdeckDir(yr)}bwp${nn}${yr}.dat`);
+      const lines = b.trim().split('\n').filter(Boolean);
+      const f = lines[lines.length - 1].split(',').map((s) => s.trim());
+      const blat = atcfDeg(f[6]);
+      const blon = atcfDeg(f[7]);
+      if (blat == null || blon == null) continue;
+      const d = Math.hypot(blat - lat, blon - lon);
+      if (d < 3 && (!best || d < best.d)) best = { nn, yy: String(yr).slice(2), anchor: f[2], d };
+    } catch {
+      /* skip unreadable deck */
+    }
+  }
+  return best;
+}
+
+// Build a UTC ms from a JTWC "DDHHMM" stamp using the b-deck anchor (YYYYMMDDHH)
+// for year/month, rolling to next month when the day wraps backwards.
+function jtwcTime(ddhhmm, anchor) {
+  const yr = parseInt(anchor.slice(0, 4), 10);
+  let mo = parseInt(anchor.slice(4, 6), 10); // 1-12
+  const anchorDay = parseInt(anchor.slice(6, 8), 10);
+  const dd = parseInt(ddhhmm.slice(0, 2), 10);
+  const hh = parseInt(ddhhmm.slice(2, 4), 10);
+  const mm = parseInt(ddhhmm.slice(4, 6), 10);
+  if (dd < anchorDay - 3) mo += 1; // day wrapped into next month
+  return Date.UTC(yr, mo - 1, dd, hh, mm);
+}
+
+// Parse a JTWC warning into a track of { ms, lat, lon, windKt, windKph, cat }.
+function parseJtwcWarning(txt, anchor) {
+  const pts = [];
+  const cur = /WARNING POSITION:\s*(\d{6})Z\s*---\s*NEAR\s*([\d.]+)N\s*([\d.]+)E/.exec(txt);
+  const curW = /WARNING POSITION:[\s\S]*?MAX SUSTAINED WINDS\s*-\s*(\d+)\s*KT/.exec(txt);
+  const push = (ddhhmm, latS, lonS, ktS) => {
+    const kt = ktS != null ? parseInt(ktS, 10) : null;
+    pts.push({
+      ms: jtwcTime(ddhhmm, anchor),
+      lat: parseFloat(latS),
+      lon: parseFloat(lonS),
+      windKt: kt,
+      windKph: kt != null ? Math.round(kt * 1.852) : null,
+      cat: categoryKt(kt),
+    });
+  };
+  if (cur) push(cur[1], cur[2], cur[3], curW ? curW[1] : null);
+  const re =
+    /(\d+)\s*HRS?,\s*VALID AT:\s*(\d{6})Z\s*---\s*([\d.]+)N\s*([\d.]+)E[\s\S]*?MAX SUSTAINED WINDS\s*-\s*(\d+)\s*KT/g;
+  let m;
+  while ((m = re.exec(txt))) push(m[2], m[3], m[4], m[5]);
+  pts.sort((a, b) => a.ms - b.ms);
+  return pts;
+}
+
+// Full JTWC forecast track (positions + winds) for the storm near (lat, lon).
+async function jtwcTrack(lat, lon) {
+  const r = await resolveJtwc(lat, lon);
+  if (!r) return null;
+  const txt = await fetchText(jtwcWarningUrl(r.nn, r.yy));
+  const track = parseJtwcWarning(txt, r.anchor);
+  if (track.length < 2) return null;
+  return { track, issued: track[0] ? new Date(track[0].ms).toISOString() : null };
 }
 
 // Pull the forecast track for a storm by international name (e.g. "BAVI").
@@ -124,30 +233,59 @@ function crossings(track) {
   return { entry, exit };
 }
 
-export async function getParTiming(intlName) {
+/**
+ * PAR entry/exit timing + forecast track. Prefers JTWC (positions WITH per-point
+ * max winds), then JMA (positions only), then null (caller estimates). Pass the
+ * current position so JTWC can be resolved by best-track match.
+ */
+export async function getParTiming(intlName, curLat, curLon) {
   const key = String(intlName || '').toUpperCase();
   const now = Date.now();
   const hit = cache.get(key);
   if (hit && now - hit.t < CACHE_TTL_MS) return hit.value;
+
   let value = null;
-  try {
-    const res = await jmaTrack(intlName);
-    if (res && res.track.length >= 2) {
-      const { entry, exit } = crossings(res.track);
-      if (entry || exit) {
-        value = {
-          source: 'JMA (RSMC Tokyo)',
-          issued: res.issued,
-          entry,
-          exit,
-          track: res.track, // full forecast track for the map (positions + radii)
-        };
+
+  // 1) JTWC — richest: positions + winds (1-min sustained).
+  if (curLat != null && curLon != null) {
+    try {
+      const jt = await jtwcTrack(curLat, curLon);
+      if (jt && jt.track.length >= 2) {
+        const { entry, exit } = crossings(jt.track);
+        if (entry || exit) {
+          value = {
+            source: 'JTWC',
+            windSource: 'JTWC (1-min winds)',
+            issued: jt.issued,
+            entry,
+            exit,
+            track: jt.track,
+          };
+        }
       }
+    } catch (err) {
+      console.error('[typhoon-forecast] JTWC failed:', err.message);
     }
-  } catch (err) {
-    console.error('[typhoon-forecast] JMA fetch failed:', err.message);
-    value = null;
   }
+
+  // 2) JMA — used as the full fallback (no JTWC), and to backfill the EXIT when
+  // JTWC's window ends before the storm leaves PAR (common on recurvature).
+  if (!value || !value.exit) {
+    try {
+      const res = await jmaTrack(intlName);
+      if (res && res.track.length >= 2) {
+        const { entry, exit } = crossings(res.track);
+        if (!value && (entry || exit)) {
+          value = { source: 'JMA (RSMC Tokyo)', issued: res.issued, entry, exit, track: res.track };
+        } else if (value && !value.exit && exit) {
+          value.exit = { ...exit, src: 'JMA' }; // JTWC track + JMA exit
+        }
+      }
+    } catch (err) {
+      console.error('[typhoon-forecast] JMA failed:', err.message);
+    }
+  }
+
   cache.set(key, { t: now, value });
   return value;
 }
