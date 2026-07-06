@@ -211,17 +211,22 @@ export async function renderTyphoonCard(t, opts = {}) {
     // ---- JMA forecast track (ScienceKonek-style) ----
     const pts = track.map((p) => ({ ...p, x: gx(p.lon), y: gy(p.lat) }));
 
-    // forecast cone: JMA uncertainty circles (metres -> px), soft red swath
+    // Forecast-uncertainty cone: JMA probability circles (metres -> px). Drawn
+    // as ONE union path so overlaps don't darken, giving a uniform soft swath.
+    // Uses the dedicated `cone` layer when the track itself carries no radii
+    // (i.e. when JTWC supplies the positions/winds).
+    const conePts = (t.timing.cone || track).map((p) => ({ ...p, x: gx(p.lon), y: gy(p.lat) }));
     ctx.save();
-    ctx.fillStyle = 'rgba(229,80,57,0.15)';
-    for (const p of pts) {
+    ctx.fillStyle = 'rgba(229,80,57,0.2)';
+    ctx.beginPath();
+    for (const p of conePts) {
       if (p.radiusM) {
         const rpx = (p.radiusM / 111000) * scale;
-        ctx.beginPath();
+        ctx.moveTo(p.x + rpx, p.y);
         ctx.arc(p.x, p.y, rpx, 0, Math.PI * 2);
-        ctx.fill();
       }
     }
+    ctx.fill();
     ctx.restore();
 
     // track line through the forecast positions

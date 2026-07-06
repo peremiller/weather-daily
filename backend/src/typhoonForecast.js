@@ -268,17 +268,19 @@ export async function getParTiming(intlName, curLat, curLon) {
     }
   }
 
-  // 2) JMA — used as the full fallback (no JTWC), and to backfill the EXIT when
-  // JTWC's window ends before the storm leaves PAR (common on recurvature).
-  if (!value || !value.exit) {
+  // 2) JMA — full fallback (no JTWC), and when JTWC IS primary we still pull JMA
+  // to (a) backfill the EXIT if JTWC's window ends inside PAR, and (b) supply the
+  // forecast-uncertainty cone (JTWC points carry no probability radii; JMA's do).
+  if (!value || value.source === 'JTWC') {
     try {
       const res = await jmaTrack(intlName);
       if (res && res.track.length >= 2) {
         const { entry, exit } = crossings(res.track);
         if (!value && (entry || exit)) {
           value = { source: 'JMA (RSMC Tokyo)', issued: res.issued, entry, exit, track: res.track };
-        } else if (value && !value.exit && exit) {
-          value.exit = { ...exit, src: 'JMA' }; // JTWC track + JMA exit
+        } else if (value) {
+          if (!value.exit && exit) value.exit = { ...exit, src: 'JMA' }; // JTWC track + JMA exit
+          value.cone = res.track; // JMA probability circles -> uncertainty cone
         }
       }
     } catch (err) {
