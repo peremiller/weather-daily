@@ -427,9 +427,12 @@ export async function renderTyphoonCard(t, opts = {}) {
   // ================= PAR ENTRY / EXIT BAND =================
   const bandY = sy + 128 + 22;
   const bandH = 132;
+  // Past-tense the header once it has happened (tied to status, so it can never
+  // disagree with the banner): a past entry reads "ENTERED PAR", not "PAR ENTRY".
+  const entered = t.status === 'inside' || t.status === 'exited';
   const tcells = [
-    ['PAR ENTRY', fmtTiming(t.timing, 'entry', tz)],
-    ['PAR EXIT', fmtTiming(t.timing, 'exit', tz)],
+    [entered ? 'ENTERED PAR' : 'PAR ENTRY', fmtTiming(t.timing, 'entry', tz)],
+    [t.status === 'exited' ? 'EXITED PAR' : 'PAR EXIT', fmtTiming(t.timing, 'exit', tz)],
   ];
   const tcw = (W - 80 - 24) / 2;
   tcells.forEach(([k, val], i) => {

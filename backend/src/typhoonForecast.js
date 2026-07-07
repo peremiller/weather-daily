@@ -261,16 +261,21 @@ export function positionAt(track, ms) {
  * 'inside' | 'approaching' | 'exited'.
  */
 export function currentState(timing, nowMs = Date.now()) {
-  if (!timing || !timing.track) return null;
-  const pos = positionAt(timing.track, nowMs);
-  if (!pos) return null;
+  if (!timing) return null;
+  const pos = timing.track ? positionAt(timing.track, nowMs) : null;
+  const entry = timing.entry != null ? timing.entry.ms : null;
+  const exit = timing.exit != null ? timing.exit.ms : null;
   let status;
-  if (inPar(pos.lat, pos.lon)) {
-    status = 'inside';
+  // Prefer the forecast crossing TIMES so status can never disagree with the
+  // entry/exit shown on the card (both come from the same track).
+  if (entry != null) {
+    if (nowMs < entry) status = 'approaching';
+    else if (exit != null && nowMs >= exit) status = 'exited';
+    else status = 'inside';
+  } else if (pos) {
+    status = inPar(pos.lat, pos.lon) ? 'inside' : 'approaching';
   } else {
-    const entered = timing.entry && nowMs >= timing.entry.ms;
-    const exited = timing.exit && nowMs >= timing.exit.ms;
-    status = entered && exited ? 'exited' : 'approaching';
+    return null;
   }
   return { status, pos };
 }
