@@ -120,6 +120,22 @@ export async function safeTyphoonCard(weather) {
   }
 }
 
+/** Register the bot's command menu (the "/" / menu button in Telegram). */
+export async function registerCommands() {
+  try {
+    await call('setMyCommands', {
+      commands: [
+        { command: 'weather', description: '🌦 Get my current forecast' },
+        { command: 'changelocation', description: '📍 Set or change my location' },
+        { command: 'help', description: '❓ How to use this bot' },
+      ],
+    });
+    console.log('[telegram] Command menu registered.');
+  } catch (err) {
+    console.error('[telegram] setMyCommands failed:', err.message);
+  }
+}
+
 /** Send a PNG buffer as a photo message. */
 export async function sendPhoto(chatId, pngBuffer, caption) {
   const form = new FormData();

@@ -96,9 +96,11 @@ async function setLocationByText(chatId, raw) {
     }
     await setUserLocation(chatId, loc);
     awaitingLocation.delete(chatId);
-    await telegram.sendText(chatId, `📍 Location set to ${loc.name}.`, {
-      reply_markup: { remove_keyboard: true },
-    });
+    await telegram.sendText(
+      chatId,
+      `📍 Location set to ${loc.name}. (Wrong place? Send /changelocation.)`,
+      MENU_KEYBOARD,
+    );
     await sendForecastFor(chatId, loc);
     return true;
   } catch {
@@ -118,9 +120,8 @@ async function sendForecastFor(chatId, loc) {
   } catch {
     /* skip panel on error */
   }
-  await telegram.sendText(chatId, text, {
-    reply_markup: { remove_keyboard: true },
-  });
+  // Keep the persistent quick-action menu visible.
+  await telegram.sendText(chatId, text, MENU_KEYBOARD);
   // Image card at the end of the message (rich postcard when available).
   const card = await telegram.safeDailyCard(weather);
   if (card) {
@@ -152,9 +153,45 @@ const FIRST_TIME_INTRO =
   "After that, message me anytime for your local weather, or /changelocation if you move.";
 
 const CHANGE_LOCATION_PROMPT =
-  '📍 Sure — send your new city name (e.g. Cebu), or paste coordinates.\n' +
+  '📍 Send your city name (e.g. Cebu), or paste coordinates like 14.55, 121.02.\n' +
   '💻 On Telegram Desktop the location button does nothing, so just type the city.\n' +
   '📱 On mobile you can tap the button below instead.';
+
+// Persistent quick-action menu shown under the message box.
+const MENU_KEYBOARD = {
+  reply_markup: {
+    keyboard: [
+      [{ text: '🌦 My weather' }],
+      [{ text: '📍 Change location' }, { text: '❓ Help' }],
+    ],
+    resize_keyboard: true,
+  },
+};
+
+const HELP_TEXT =
+  '🤖 *My Daily Weather* — here\'s what I can do:\n\n' +
+  '🌦 /weather — your current forecast\n' +
+  '📍 /changelocation — set or change your location\n' +
+  '❓ /help — show this menu\n\n' +
+  'You also get an automatic forecast every morning.\n' +
+  '💡 To set your location, just type your *city name* (e.g. Manila) or send /setlocation <city>.';
+
+// Greetings / noise that must NOT be geocoded (e.g. "Hi" matched a town in
+// Timor-Leste). Also reject anything too short to be a real place name.
+const GREETINGS = new Set([
+  'hi', 'hi!', 'hello', 'hello!', 'hey', 'heya', 'hiya', 'yo', 'sup', 'hallo',
+  'hola', 'oi', 'hoy', 'kumusta', 'kamusta', 'musta', 'test', 'testing', 'ok',
+  'okay', 'k', 'thanks', 'thank you', 'ty', 'salamat', 'good morning',
+  'good afternoon', 'good evening', 'good day', 'start', 'menu', 'help',
+]);
+function isNoise(t) {
+  const s = String(t).trim().toLowerCase();
+  if (!s) return true;
+  if (GREETINGS.has(s)) return true;
+  // too short to be a real place (guards "hi", "yo", "ok", etc.)
+  if (s.replace(/[^a-z]/gi, '').length < 3) return true;
+  return false;
+}
 
 export async function handleTelegramMessage(msg) {
   const chatId = msg?.chat?.id;
@@ -181,20 +218,49 @@ export async function handleTelegramMessage(msg) {
     if (setCmd) {
       if (!(await setLocationByText(chatId, setCmd[1].trim()))) {
         awaitingLocation.add(chatId);
-        await telegram.sendText(chatId, `🤔 I couldn't find "${setCmd[1].trim()}". Try another spelling, a nearby city, or coordinates (lat, lon).`);
+        await telegram.sendText(chatId, `🤔 I couldn't find "${setCmd[1].trim()}". Try another spelling, a nearby city, or coordinates (lat, lon).`, MENU_KEYBOARD);
       }
       return;
     }
 
-    // Bare /changelocation — ask for the new city (button for mobile).
-    if (text === '/changelocation' || text === '/change' || text === '/setlocation') {
+    const saved = await getUserLocation(chatId);
+    const menuBtn = text.replace(/[^\w ]/g, '').trim(); // strip emoji from menu taps
+
+    // Help / menu.
+    if (text === '/help' || text === '/menu' || menuBtn === 'help' || menuBtn === 'menu') {
+      await telegram.sendText(chatId, HELP_TEXT, { parse_mode: 'Markdown', ...MENU_KEYBOARD });
+      return;
+    }
+
+    // Change location (button, command, or bare word).
+    if (text === '/changelocation' || text === '/change' || text === '/setlocation' ||
+        menuBtn === 'change location') {
       awaitingLocation.add(chatId);
       await promptForLocation(chatId, CHANGE_LOCATION_PROMPT);
       return;
     }
 
-    // 1) User shared a location pin (mobile "Share my location", or Desktop's
-    //    attachment → Location menu).
+    // Get weather now (button, command) — needs a saved location.
+    if (text === '/weather' || text === '/now' || menuBtn === 'my weather' || menuBtn === 'weather') {
+      if (saved) return void (await sendForecastFor(chatId, saved));
+      awaitingLocation.add(chatId);
+      await promptForLocation(chatId, FIRST_TIME_INTRO);
+      return;
+    }
+
+    // /start or a first hello — greet, show the menu, ask for location.
+    if (text === '/start' || text.startsWith('/start ')) {
+      if (saved) {
+        await telegram.sendText(chatId, "👋 Welcome back! Here's your latest forecast.", MENU_KEYBOARD);
+        await sendForecastFor(chatId, saved);
+      } else {
+        awaitingLocation.add(chatId);
+        await telegram.sendText(chatId, FIRST_TIME_INTRO, MENU_KEYBOARD);
+      }
+      return;
+    }
+
+    // User shared a location pin (mobile button, or Desktop attachment → Location).
     if (msg.location) {
       const { latitude, longitude } = msg.location;
       const name = await reverseGeocode(latitude, longitude);
@@ -205,23 +271,27 @@ export async function handleTelegramMessage(msg) {
       return;
     }
 
-    const saved = await getUserLocation(chatId);
-
-    // 2) We're waiting for a location (new user, or after /changelocation), or
-    //    the user has none yet — treat any typed text as a city / coordinates.
-    if (awaitingLocation.has(chatId) || !saved) {
-      if (raw && !isCommand && (await setLocationByText(chatId, raw))) return;
-      // Couldn't resolve it (or empty/command) — (re)prompt.
-      awaitingLocation.add(chatId);
-      if (raw && !isCommand) {
-        await telegram.sendText(chatId, `🤔 I couldn't find "${raw}". Type your city name (e.g. Manila), paste coordinates, or tap the button (mobile).`);
-      } else {
-        await promptForLocation(chatId, FIRST_TIME_INTRO);
-      }
+    // We asked for a location and are waiting for it — treat the text as a
+    // city / coordinates, but ignore greetings/noise so "Hi" never geocodes.
+    if (awaitingLocation.has(chatId)) {
+      if (!isCommand && !isNoise(raw) && (await setLocationByText(chatId, raw))) return;
+      await telegram.sendText(
+        chatId,
+        `🤔 I need a place name. Type your city (e.g. Manila or Cebu City), paste coordinates, or tap 📍 below.`,
+        LOCATION_KEYBOARD,
+      );
       return;
     }
 
-    // 3) Returning user with a saved location — send their local forecast.
+    // Brand-new user with no saved location — greet + menu, DON'T geocode their
+    // first message (that's how "Hi" became Timor-Leste). Wait for a real city.
+    if (!saved) {
+      awaitingLocation.add(chatId);
+      await telegram.sendText(chatId, FIRST_TIME_INTRO, MENU_KEYBOARD);
+      return;
+    }
+
+    // Returning user with a saved location — send their local forecast.
     await sendForecastFor(chatId, saved);
   } catch (err) {
     console.error('[telegram handler]', err.message);
@@ -316,6 +386,7 @@ app.listen(config.port, () => {
 
   // Reply to on-demand Telegram messages via long polling (no public URL needed).
   if (config.telegram.enabled) {
+    telegram.registerCommands();
     telegram.startPolling(handleTelegramMessage).catch((err) =>
       console.error('[telegram] Failed to start polling:', err.message)
     );
