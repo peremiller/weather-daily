@@ -72,9 +72,37 @@ const CAT_RANGE = {
   STY: '185+ km/h',
 };
 
-const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-function dateLabel(d = new Date()) {
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+// ---- date/time: everything renders in the user's location timezone ----------
+// Format a UTC instant in the user's IANA timezone (e.g. "Asia/Manila").
+// Returns { label:"WED JUL 8", time:"8 AM", tzAbbr:"GMT+8" }. All date/time on
+// the card runs through this so it reflects the USER's current location.
+function localParts(ms, tz) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  }).formatToParts(new Date(ms));
+  const g = (type) => (parts.find((p) => p.type === type) || {}).value || '';
+  const minute = g('minute');
+  const time = minute === '00' ? `${g('hour')} ${g('dayPeriod')}` : `${g('hour')}:${minute} ${g('dayPeriod')}`;
+  return { label: `${g('weekday')} ${g('month')} ${g('day')}`.toUpperCase(), time, tzAbbr: g('timeZoneName') };
+}
+
+// "JULY 6, 2026" in the user's timezone (footer date).
+function dateLabel(tz, d = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).formatToParts(d);
+  const g = (type) => (parts.find((p) => p.type === type) || {}).value || '';
+  return `${g('month')} ${g('day')}, ${g('year')}`.toUpperCase();
 }
 
 /** Render the typhoon postcard as a PNG Buffer. `t` = getTyphoonWatch() result. */
@@ -85,6 +113,8 @@ export async function renderTyphoonCard(t, opts = {}) {
 
   const approaching = t.status === 'approaching';
   const ac = alertColor(t.alert);
+  // User's location timezone (IANA). Defaults to Manila — this is a PAR card.
+  const tz = opts.tz || 'Asia/Manila';
 
   // ---- background: deep stormy gradient ----
   const bg = ctx.createLinearGradient(0, 0, W, H);
@@ -274,7 +304,7 @@ export async function renderTyphoonCard(t, opts = {}) {
       ctx.stroke();
       const labelThis = i % 2 === 0 || i === pts.length - 1;
       if (!labelThis) return;
-      const d = pht(p.ms);
+      const d = localParts(p.ms, tz);
       // Alternate labels to opposite corners so neighbours don't stack; points
       // very near the storm are forced left to clear the swirl.
       const k = li++;
@@ -394,8 +424,8 @@ export async function renderTyphoonCard(t, opts = {}) {
   const bandY = sy + 128 + 22;
   const bandH = 132;
   const tcells = [
-    ['PAR ENTRY', fmtTiming(t.timing, 'entry')],
-    ['PAR EXIT', fmtTiming(t.timing, 'exit')],
+    ['PAR ENTRY', fmtTiming(t.timing, 'entry', tz)],
+    ['PAR EXIT', fmtTiming(t.timing, 'exit', tz)],
   ];
   const tcw = (W - 80 - 24) / 2;
   tcells.forEach(([k, val], i) => {
@@ -442,7 +472,7 @@ export async function renderTyphoonCard(t, opts = {}) {
   ctx.textAlign = 'left';
   ctx.fillStyle = '#ffd23f';
   ctx.font = '34px RobotoBold';
-  ctx.fillText(`FORECAST · ${opts.date || dateLabel()}`, 40, stripY + 34);
+  ctx.fillText(`FORECAST · ${opts.date || dateLabel(tz)}`, 40, stripY + 34);
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = '24px Roboto';
   const src = t.timing?.source === 'JTWC'
@@ -461,33 +491,20 @@ export async function renderTyphoonCard(t, opts = {}) {
   return canvas.toBuffer('image/png');
 }
 
-// Convert a UTC ms to Philippine time (UTC+8) parts for display.
-function pht(ms) {
-  const d = new Date(ms + 8 * 3600 * 1000); // shift, then read UTC fields
-  const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
-  const mo = MONTHS[d.getUTCMonth()];
-  let h = d.getUTCHours();
-  const m = d.getUTCMinutes();
-  const ap = h < 12 ? 'AM' : 'PM';
-  h = h % 12 || 12;
-  const time = m ? `${h}:${String(m).padStart(2, '0')} ${ap}` : `${h} ${ap}`;
-  return { label: `${wd} ${mo} ${d.getUTCDate()}`, time };
-}
-
-// A cell's ENTRY/EXIT text: official JMA time, a labelled estimate, or a
-// PAGASA-defers message — never a fabricated precise time.
-function fmtTiming(timing, which) {
+// A cell's ENTRY/EXIT text: official JMA/JTWC time (in the user's timezone), a
+// labelled estimate, or a PAGASA-defers message — never a fabricated time.
+function fmtTiming(timing, which, tz) {
   if (!timing || !timing[which]) {
     return { main: 'PAGASA advises', sub: which === 'exit' ? 'beyond forecast' : 'on approach' };
   }
   const seg = timing[which];
   const isEst = timing.source === 'estimate' || seg.estimate;
-  const d = pht(seg.ms);
+  const d = localParts(seg.ms, tz);
   if (isEst) {
     return { main: `~${d.label}`, sub: `est. · assumed ${timing.assumedKmh || 20} km/h`, estimate: true };
   }
   const srcAbbr = seg.src || (timing.source === 'JTWC' ? 'JTWC' : timing.source && timing.source.startsWith('JMA') ? 'JMA' : 'fcst');
-  return { main: d.label, sub: `${d.time} PHT · ${srcAbbr}` };
+  return { main: d.label, sub: `${d.time} ${d.tzAbbr} · ${srcAbbr}` };
 }
 
 // ---- drawing helpers -------------------------------------------------------

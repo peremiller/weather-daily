@@ -112,7 +112,8 @@ export async function safeDailyCard(weather) {
 export async function safeTyphoonCard(weather) {
   if (!weather.typhoon || !weather.typhoon.active) return null;
   try {
-    return await renderTyphoonCard(weather.typhoon);
+    // Dates/times on the card use the user's location timezone (IANA).
+    return await renderTyphoonCard(weather.typhoon, { tz: weather.timezone });
   } catch (err) {
     console.error('[telegram] typhoon card render failed:', err.message);
     return null;
