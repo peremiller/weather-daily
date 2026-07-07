@@ -149,16 +149,20 @@ export async function renderTyphoonCard(t, opts = {}) {
   // sub-line: relationship to PAR
   ctx.fillStyle = 'rgba(255,255,255,0.95)';
   ctx.font = '40px RobotoBold';
-  ctx.fillText(
-    approaching ? 'APPROACHING PAR — NOT YET INSIDE' : 'INSIDE PAR',
-    58,
-    176
-  );
-  // expected Philippine local name (PAGASA names on entry)
+  const subline =
+    t.status === 'inside'
+      ? 'INSIDE PAR'
+      : t.status === 'exited'
+        ? 'HAS EXITED PAR'
+        : 'APPROACHING PAR — NOT YET INSIDE';
+  ctx.fillText(subline, 58, 176);
+  // Philippine local name — "expected" until it's actually inside PAR (PAGASA
+  // assigns the official name on entry).
   if (t.localName) {
     ctx.font = '30px RobotoBold';
     ctx.fillStyle = '#ffe08a';
-    ctx.fillText(`EXPECTED PH NAME: ${t.localName.toUpperCase()}`, 58, 220);
+    const nameLabel = t.status === 'inside' ? 'PH NAME (PAGASA)' : 'EXPECTED PH NAME';
+    ctx.fillText(`${nameLabel}: ${t.localName.toUpperCase()}`, 58, 220);
   }
 
   // ================= MAP PANEL =================

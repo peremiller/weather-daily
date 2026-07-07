@@ -233,6 +233,48 @@ function crossings(track) {
   return { entry, exit };
 }
 
+// Interpolate a track (timestamped points) to a given instant → { lat, lon,
+// windKph }. Clamps to the first/last point outside the track window.
+export function positionAt(track, ms) {
+  if (!track || !track.length) return null;
+  if (ms <= track[0].ms) return { ...track[0] };
+  const last = track[track.length - 1];
+  if (ms >= last.ms) return { ...last };
+  for (let i = 1; i < track.length; i++) {
+    const a = track[i - 1];
+    const b = track[i];
+    if (ms >= a.ms && ms <= b.ms) {
+      const f = b.ms === a.ms ? 0 : (ms - a.ms) / (b.ms - a.ms);
+      const w =
+        a.windKph != null && b.windKph != null
+          ? Math.round(a.windKph + (b.windKph - a.windKph) * f)
+          : a.windKph ?? b.windKph ?? null;
+      return { ms, lat: a.lat + (b.lat - a.lat) * f, lon: a.lon + (b.lon - a.lon) * f, windKph: w };
+    }
+  }
+  return { ...last };
+}
+
+/**
+ * The storm's CURRENT position + PAR status from the forecast track at `nowMs`
+ * — used to override a stale GDACS fix. Returns { status, pos } where status is
+ * 'inside' | 'approaching' | 'exited'.
+ */
+export function currentState(timing, nowMs = Date.now()) {
+  if (!timing || !timing.track) return null;
+  const pos = positionAt(timing.track, nowMs);
+  if (!pos) return null;
+  let status;
+  if (inPar(pos.lat, pos.lon)) {
+    status = 'inside';
+  } else {
+    const entered = timing.entry && nowMs >= timing.entry.ms;
+    const exited = timing.exit && nowMs >= timing.exit.ms;
+    status = entered && exited ? 'exited' : 'approaching';
+  }
+  return { status, pos };
+}
+
 /**
  * PAR entry/exit timing + forecast track. Prefers JTWC (positions WITH per-point
  * max winds), then JMA (positions only), then null (caller estimates). Pass the

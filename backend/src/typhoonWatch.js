@@ -12,7 +12,7 @@
  * GDACS, and the card/message attribute it. No clickbait.
  */
 
-import { getParTiming, estimateParEntry } from './typhoonForecast.js';
+import { getParTiming, estimateParEntry, currentState } from './typhoonForecast.js';
 
 const GDACS_URL =
   'https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP';
@@ -138,6 +138,19 @@ export async function getTyphoonWatch() {
       } catch {
         value.timing = estimateParEntry(value) || null;
       }
+
+      // GDACS's fix can lag hours behind (it stopped updating BAVI after PAR
+      // approach), so once we have an official forecast track, take the CURRENT
+      // position + in/out status from it interpolated to now — otherwise the
+      // card can say "approaching / not yet inside" after the entry time passed.
+      const cs = currentState(value.timing);
+      if (cs) {
+        value.status = cs.status;
+        value.lat = Math.round(cs.pos.lat * 10) / 10;
+        value.lon = Math.round(cs.pos.lon * 10) / 10;
+        value.degToPAR =
+          cs.status === 'approaching' ? Math.round((value.lon - 135) * 10) / 10 : 0;
+      }
     }
     cache = { t: now, value };
     return value;
@@ -152,9 +165,13 @@ export async function getTyphoonWatch() {
 export function typhoonWatchLine(t) {
   if (!t || !t.active) return null;
   const w = t.maxWindKph ? ` · ${t.maxWindKph} km/h winds` : '';
-  const ph = t.localName ? ` (expected PH name: ${t.localName})` : '';
   if (t.status === 'inside') {
-    return `🌀 ${t.category} ${t.name}${ph} is inside PAR${w} (${t.source}). Follow PAGASA bulletins.`;
+    const ph = t.localName ? ` (PH name: ${t.localName})` : '';
+    return `🌀 ${t.category} ${t.name}${ph} is INSIDE PAR${w} (${t.source}). Follow PAGASA bulletins.`;
   }
+  if (t.status === 'exited') {
+    return `🌀 ${t.category} ${t.name} has exited PAR${w} (${t.source}). Follow PAGASA for the latest.`;
+  }
+  const ph = t.localName ? ` (expected PH name: ${t.localName})` : '';
   return `🌀 ${t.category} ${t.name}${ph} is approaching PAR from the east${w} (${t.source}). Not yet inside — official name & timing come from PAGASA on entry.`;
 }
