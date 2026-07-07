@@ -205,10 +205,17 @@ export async function renderTyphoonCard(t, opts = {}) {
     ctx.beginPath(); ctx.moveTo(px, gy(lat)); ctx.lineTo(px + pw, gy(lat)); ctx.stroke();
   }
 
-  // Real coastlines — Philippines + Taiwan (northern context, where it recurves)
-  for (const outline of [PH_OUTLINE, TW_OUTLINE]) {
-    ctx.fillStyle = '#6f9e78';
-    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  // Real coastlines. The Philippines is the subject (green); neighbours like
+  // Taiwan are drawn in a muted grey so they read as geographic CONTEXT — most
+  // of Taiwan genuinely sits inside PAR (its 25°N edge runs through Taipei), so
+  // the dimmer tone keeps that from looking like it's "part of" the PH area.
+  const lands = [
+    { outline: PH_OUTLINE, fill: '#6f9e78', stroke: 'rgba(255,255,255,0.18)' },
+    { outline: TW_OUTLINE, fill: '#525f59', stroke: 'rgba(255,255,255,0.10)' },
+  ];
+  for (const { outline, fill, stroke } of lands) {
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = stroke;
     ctx.lineWidth = 1.5;
     for (const ring of outline) {
       ctx.beginPath();
@@ -222,9 +229,9 @@ export async function renderTyphoonCard(t, opts = {}) {
     }
   }
   // land labels
-  ctx.fillStyle = 'rgba(255,255,255,0.8)';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
   ctx.font = '22px RobotoBold';
   ctx.save();
   ctx.translate(gx(121.2), gy(12.5));
@@ -232,8 +239,9 @@ export async function renderTyphoonCard(t, opts = {}) {
   ctx.fillText('PHILIPPINES', 0, 0);
   ctx.restore();
   if (TW_OUTLINE.length) {
-    ctx.font = '18px RobotoBold';
-    ctx.fillText('TAIWAN', gx(121), gy(23.6));
+    ctx.font = '17px RobotoBold';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; // dimmer — it's context, not subject
+    ctx.fillText('TAIWAN', gx(120.9), gy(23.6));
   }
 
   // PAR boundary (dashed)
