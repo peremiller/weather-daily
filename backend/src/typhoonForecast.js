@@ -98,12 +98,43 @@ async function resolveJtwc(lat, lon) {
       const blon = atcfDeg(f[7]);
       if (blat == null || blon == null) continue;
       const d = Math.hypot(blat - lat, blon - lon);
-      if (d < 3 && (!best || d < best.d)) best = { nn, yy: String(yr).slice(2), anchor: f[2], d };
+      if (d < 3 && (!best || d < best.d)) {
+        best = { nn, yy: String(yr).slice(2), anchor: f[2], d, text: b };
+      }
     } catch {
       /* skip unreadable deck */
     }
   }
+  if (best) best.observed = parseBdeck(best.text);
   return best;
+}
+
+// Parse an ATCF best-track (b-deck) into an OBSERVED track: one point per fix
+// time. This is fixed history — unlike the forecast, it doesn't shift on reissue.
+function parseBdeck(txt) {
+  const seen = new Set();
+  const pts = [];
+  for (const line of String(txt).trim().split('\n')) {
+    const f = line.split(',').map((s) => s.trim());
+    if (f[4] !== 'BEST') continue;
+    const ymdh = f[2];
+    if (!ymdh || seen.has(ymdh)) continue; // dedupe repeated wind-radii rows
+    seen.add(ymdh);
+    const lat = atcfDeg(f[6]);
+    const lon = atcfDeg(f[7]);
+    if (lat == null || lon == null) continue;
+    const kt = parseInt(f[8], 10);
+    pts.push({
+      ms: Date.UTC(+ymdh.slice(0, 4), +ymdh.slice(4, 6) - 1, +ymdh.slice(6, 8), +ymdh.slice(8, 10)),
+      lat,
+      lon,
+      windKt: Number.isFinite(kt) ? kt : null,
+      windKph: Number.isFinite(kt) ? Math.round(kt * 1.852) : null,
+      cat: categoryKt(Number.isFinite(kt) ? kt : null),
+    });
+  }
+  pts.sort((a, b) => a.ms - b.ms);
+  return pts;
 }
 
 // Build a UTC ms from a JTWC "DDHHMM" stamp using the b-deck anchor (YYYYMMDDHH)
@@ -142,16 +173,6 @@ function parseJtwcWarning(txt, anchor) {
   while ((m = re.exec(txt))) push(m[2], m[3], m[4], m[5]);
   pts.sort((a, b) => a.ms - b.ms);
   return pts;
-}
-
-// Full JTWC forecast track (positions + winds) for the storm near (lat, lon).
-async function jtwcTrack(lat, lon) {
-  const r = await resolveJtwc(lat, lon);
-  if (!r) return null;
-  const txt = await fetchText(jtwcWarningUrl(r.nn, r.yy));
-  const track = parseJtwcWarning(txt, r.anchor);
-  if (track.length < 2) return null;
-  return { track, issued: track[0] ? new Date(track[0].ms).toISOString() : null };
 }
 
 // Pull the forecast track for a storm by international name (e.g. "BAVI").
@@ -291,47 +312,80 @@ export async function getParTiming(intlName, curLat, curLon) {
   const hit = cache.get(key);
   if (hit && now - hit.t < CACHE_TTL_MS) return hit.value;
 
-  let value = null;
-
-  // 1) JTWC — richest: positions + winds (1-min sustained).
+  // Observed best-track history (UCAR b-deck). It is FIXED — unlike the forecast
+  // it doesn't shift on reissue — and reachable even when the JTWC warning server
+  // 403s. Prepending it to any forecast anchors a PAST entry to real observations
+  // so the "ENTERED PAR" time stops wobbling. Crossings run on observed+forecast.
+  let observed = [];
+  let jtwcMeta = null;
   if (curLat != null && curLon != null) {
     try {
-      const jt = await jtwcTrack(curLat, curLon);
-      if (jt && jt.track.length >= 2) {
-        const { entry, exit } = crossings(jt.track);
-        if (entry || exit) {
-          value = {
-            source: 'JTWC',
-            windSource: 'JTWC (1-min winds)',
-            issued: jt.issued,
-            entry,
-            exit,
-            track: jt.track,
-          };
-        }
-      }
+      jtwcMeta = await resolveJtwc(curLat, curLon);
+      observed = (jtwcMeta && jtwcMeta.observed) || [];
     } catch (err) {
-      console.error('[typhoon-forecast] JTWC failed:', err.message);
+      console.error('[typhoon-forecast] b-deck resolve failed:', err.message);
     }
   }
+  const combinedCrossings = (fc) =>
+    crossings([...observed.filter((p) => p.ms < fc[0].ms), ...fc]);
 
-  // 2) JMA — full fallback (no JTWC), and when JTWC IS primary we still pull JMA
-  // to (a) backfill the EXIT if JTWC's window ends inside PAR, and (b) supply the
-  // forecast-uncertainty cone (JTWC points carry no probability radii; JMA's do).
-  if (!value || value.source === 'JTWC') {
+  // Forecast track: JTWC warning (per-point 1-min winds) preferred, else JMA.
+  let forecast = null;
+  let source = null;
+  let windSource = null;
+  if (jtwcMeta) {
     try {
-      const res = await jmaTrack(intlName);
-      if (res && res.track.length >= 2) {
-        const { entry, exit } = crossings(res.track);
-        if (!value && (entry || exit)) {
-          value = { source: 'JMA (RSMC Tokyo)', issued: res.issued, entry, exit, track: res.track };
-        } else if (value) {
-          if (!value.exit && exit) value.exit = { ...exit, src: 'JMA' }; // JTWC track + JMA exit
-          value.cone = res.track; // JMA probability circles -> uncertainty cone
-        }
+      const f = parseJtwcWarning(await fetchText(jtwcWarningUrl(jtwcMeta.nn, jtwcMeta.yy)), jtwcMeta.anchor);
+      if (f.length >= 2) {
+        forecast = f;
+        source = 'JTWC';
+        windSource = 'JTWC (1-min winds)';
+      }
+    } catch (err) {
+      console.error('[typhoon-forecast] JTWC warning failed:', err.message);
+    }
+  }
+  let jmaRes = null;
+  if (!forecast) {
+    try {
+      jmaRes = await jmaTrack(intlName);
+      if (jmaRes && jmaRes.track.length >= 2) {
+        forecast = jmaRes.track;
+        source = 'JMA (RSMC Tokyo)';
       }
     } catch (err) {
       console.error('[typhoon-forecast] JMA failed:', err.message);
+    }
+  }
+
+  let value = null;
+  if (forecast) {
+    const { entry, exit } = combinedCrossings(forecast);
+    if (entry || exit) {
+      value = { source, windSource, issued: new Date(forecast[0].ms).toISOString(), entry, exit, track: forecast };
+    }
+  } else if (observed.length >= 2) {
+    // No forecast anywhere — fall back to observed history only.
+    const { entry, exit } = crossings(observed);
+    if (entry || exit) {
+      value = { source: 'JTWC best-track', issued: new Date(observed[observed.length - 1].ms).toISOString(), entry, exit, track: observed };
+    }
+  }
+
+  // When JTWC supplies the forecast (no probability radii), pull JMA to supply the
+  // uncertainty CONE and backfill the EXIT if JTWC's window ends inside PAR.
+  if (value && source === 'JTWC') {
+    try {
+      const res = jmaRes || (await jmaTrack(intlName));
+      if (res && res.track.length >= 2) {
+        if (!value.exit) {
+          const { exit } = combinedCrossings(res.track);
+          if (exit) value.exit = { ...exit, src: 'JMA' };
+        }
+        value.cone = res.track; // JMA probability circles -> cone
+      }
+    } catch (err) {
+      console.error('[typhoon-forecast] JMA cone/exit failed:', err.message);
     }
   }
 
