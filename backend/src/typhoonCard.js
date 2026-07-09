@@ -56,6 +56,8 @@ const alertColor = (a) =>
 // Intensity-category colours (PAGASA scale) for track markers + legend + the
 // whole card accent, so the card recolours when the storm is up/downgraded.
 const CAT_COLOR = { STY: '#e53935', TY: '#fb8c00', STS: '#fdd835', TS: '#43a047', TD: '#42a5f5' };
+// Colour-coded alert level per intensity category (shown in the ALERT box).
+const CAT_ALERT = { STY: 'RED', TY: 'ORANGE', STS: 'YELLOW', TS: 'GREEN', TD: 'BLUE' };
 
 // Darken a #rrggbb by fraction f (0..1) for the banner gradient.
 function darken(hex, f) {
@@ -125,7 +127,6 @@ export async function renderTyphoonCard(t, opts = {}) {
   // Accent = the storm's INTENSITY-category colour, so the whole card recolours
   // on up/downgrade (STY red → TY orange → STS yellow → TS green → TD blue).
   const ac = CAT_COLOR[t.catAbbr] || alertColor(t.alert);
-  const alertCol = alertColor(t.alert); // GDACS alert level — its own cell only
   // User's location timezone (IANA). Defaults to Manila — this is a PAR card.
   const tz = opts.tz || 'Asia/Manila';
 
@@ -422,10 +423,13 @@ export async function renderTyphoonCard(t, opts = {}) {
 
   // ================= STAT ROW =================
   const sy = py + ph + 40;
+  // ALERT reflects the storm's intensity category (colour-coded), matching the
+  // card accent — so it updates on any up/downgrade.
+  const alertLevel = CAT_ALERT[t.catAbbr] || (t.alert || '—').toUpperCase();
   const cells = [
     ['CATEGORY', `${t.category}`],
     ['MAX WINDS', t.maxWindKph ? `${t.maxWindKph} km/h` : '—'],
-    ['ALERT', (t.alert || '—').toUpperCase()],
+    ['ALERT', alertLevel],
   ];
   const cw = (W - 80 - 24 * 2) / 3;
   cells.forEach(([k, v], i) => {
@@ -433,14 +437,14 @@ export async function renderTyphoonCard(t, opts = {}) {
     roundRect(ctx, x, sy, cw, 128, 16);
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
     ctx.fill();
-    ctx.strokeStyle = i === 2 ? alertCol : 'rgba(255,255,255,0.12)';
+    ctx.strokeStyle = i === 2 ? ac : 'rgba(255,255,255,0.12)';
     ctx.lineWidth = 2; ctx.stroke();
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.font = '24px RobotoBold';
     ctx.textBaseline = 'top';
     ctx.fillText(k, x + cw / 2, sy + 22);
-    ctx.fillStyle = i === 2 ? alertCol : '#ffffff';
+    ctx.fillStyle = i === 2 ? ac : '#ffffff';
     ctx.font = '40px RobotoBold';
     fitText(ctx, v, x + 12, sy + 66, cw - 24, 40, 'center');
   });
