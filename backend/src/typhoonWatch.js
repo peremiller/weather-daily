@@ -144,12 +144,21 @@ export async function getTyphoonWatch() {
       // position + in/out status from it interpolated to now — otherwise the
       // card can say "approaching / not yet inside" after the entry time passed.
       const cs = currentState(value.timing);
-      if (cs) {
+      if (cs && cs.pos) {
         value.status = cs.status;
         value.lat = Math.round(cs.pos.lat * 10) / 10;
         value.lon = Math.round(cs.pos.lon * 10) / 10;
         value.degToPAR =
           cs.status === 'approaching' ? Math.round((value.lon - 135) * 10) / 10 : 0;
+        // CURRENT intensity (10-min sustained, from the track) — not the GDACS
+        // lifetime peak — so category/winds downgrade as the storm weakens.
+        if (cs.pos.windKph != null) {
+          const c = categorize(cs.pos.windKph);
+          value.maxWindKph = cs.pos.windKph;
+          value.maxWindMph = Math.round(cs.pos.windKph / 1.609);
+          value.category = c.cat;
+          value.catAbbr = c.abbr;
+        }
       }
     }
     cache = { t: now, value };

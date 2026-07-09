@@ -57,13 +57,20 @@ async function fetchText(url) {
   return res.text();
 }
 
-// PAGASA-scale category from a 1-min max sustained wind (knots).
-function categoryKt(kt) {
-  if (kt == null) return null;
-  if (kt >= 100) return 'STY'; // Super Typhoon (~>=185 km/h)
-  if (kt >= 64) return 'TY';
-  if (kt >= 48) return 'STS';
-  if (kt >= 34) return 'TS';
+// JTWC/best-track winds are 1-minute sustained; PAGASA classifies by 10-minute
+// sustained (lower). Convert so categories/speeds match PAGASA's bulletins.
+const KT_TO_KMH = 1.852;
+const ONE_MIN_TO_TEN_MIN = 0.88; // WMO conversion factor
+const tenMinKph = (kt1min) =>
+  kt1min == null || !Number.isFinite(kt1min) ? null : Math.round(kt1min * KT_TO_KMH * ONE_MIN_TO_TEN_MIN);
+
+// PAGASA category from a 10-minute sustained wind (km/h) — matches the card legend.
+function categoryKph(kph) {
+  if (kph == null) return null;
+  if (kph >= 185) return 'STY';
+  if (kph >= 118) return 'TY';
+  if (kph >= 89) return 'STS';
+  if (kph >= 62) return 'TS';
   return 'TD';
 }
 
@@ -124,13 +131,14 @@ function parseBdeck(txt) {
     const lon = atcfDeg(f[7]);
     if (lat == null || lon == null) continue;
     const kt = parseInt(f[8], 10);
+    const kph = tenMinKph(Number.isFinite(kt) ? kt : null);
     pts.push({
       ms: Date.UTC(+ymdh.slice(0, 4), +ymdh.slice(4, 6) - 1, +ymdh.slice(6, 8), +ymdh.slice(8, 10)),
       lat,
       lon,
       windKt: Number.isFinite(kt) ? kt : null,
-      windKph: Number.isFinite(kt) ? Math.round(kt * 1.852) : null,
-      cat: categoryKt(Number.isFinite(kt) ? kt : null),
+      windKph: kph, // 10-min sustained (PAGASA convention)
+      cat: categoryKph(kph),
     });
   }
   pts.sort((a, b) => a.ms - b.ms);
@@ -157,13 +165,14 @@ function parseJtwcWarning(txt, anchor) {
   const curW = /WARNING POSITION:[\s\S]*?MAX SUSTAINED WINDS\s*-\s*(\d+)\s*KT/.exec(txt);
   const push = (ddhhmm, latS, lonS, ktS) => {
     const kt = ktS != null ? parseInt(ktS, 10) : null;
+    const kph = tenMinKph(kt);
     pts.push({
       ms: jtwcTime(ddhhmm, anchor),
       lat: parseFloat(latS),
       lon: parseFloat(lonS),
       windKt: kt,
-      windKph: kt != null ? Math.round(kt * 1.852) : null,
-      cat: categoryKt(kt),
+      windKph: kph, // 10-min sustained (PAGASA convention)
+      cat: categoryKph(kph),
     });
   };
   if (cur) push(cur[1], cur[2], cur[3], curW ? curW[1] : null);
