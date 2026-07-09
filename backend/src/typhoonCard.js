@@ -53,8 +53,18 @@ const TW_OUTLINE = loadOutline('taiwanOutline.json');
 const alertColor = (a) =>
   a === 'Red' ? '#e53935' : a === 'Orange' ? '#fb8c00' : '#43a047';
 
-// Intensity-category colours (PAGASA scale) for track markers + legend.
+// Intensity-category colours (PAGASA scale) for track markers + legend + the
+// whole card accent, so the card recolours when the storm is up/downgraded.
 const CAT_COLOR = { STY: '#e53935', TY: '#fb8c00', STS: '#fdd835', TS: '#43a047', TD: '#42a5f5' };
+
+// Darken a #rrggbb by fraction f (0..1) for the banner gradient.
+function darken(hex, f) {
+  const n = parseInt(String(hex).replace('#', ''), 16);
+  const r = Math.round(((n >> 16) & 255) * (1 - f));
+  const g = Math.round(((n >> 8) & 255) * (1 - f));
+  const b = Math.round((n & 255) * (1 - f));
+  return `rgb(${r},${g},${b})`;
+}
 const CAT_LABEL = { TD: 'TD', TS: 'TS', STS: 'STS', TY: 'TY', STY: 'STY' };
 const CAT_FULL = {
   TD: 'Tropical Depression',
@@ -112,7 +122,10 @@ export async function renderTyphoonCard(t, opts = {}) {
   const ctx = canvas.getContext('2d');
 
   const approaching = t.status === 'approaching';
-  const ac = alertColor(t.alert);
+  // Accent = the storm's INTENSITY-category colour, so the whole card recolours
+  // on up/downgrade (STY red → TY orange → STS yellow → TS green → TD blue).
+  const ac = CAT_COLOR[t.catAbbr] || alertColor(t.alert);
+  const alertCol = alertColor(t.alert); // GDACS alert level — its own cell only
   // User's location timezone (IANA). Defaults to Manila — this is a PAR card.
   const tz = opts.tz || 'Asia/Manila';
 
@@ -127,8 +140,8 @@ export async function renderTyphoonCard(t, opts = {}) {
   // ================= HEADLINE BANNER =================
   const banH = t.localName ? 252 : 210; // extra row for the expected PH name
   const bgrad = ctx.createLinearGradient(0, 0, W, banH);
-  bgrad.addColorStop(0, '#7a1418');
-  bgrad.addColorStop(1, ac);
+  bgrad.addColorStop(0, darken(ac, 0.62)); // dark shade of the category colour
+  bgrad.addColorStop(1, darken(ac, 0.18)); // keeps white headline readable on yellow/green
   ctx.fillStyle = bgrad;
   ctx.fillRect(0, 0, W, banH);
 
@@ -420,14 +433,14 @@ export async function renderTyphoonCard(t, opts = {}) {
     roundRect(ctx, x, sy, cw, 128, 16);
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
     ctx.fill();
-    ctx.strokeStyle = i === 2 ? ac : 'rgba(255,255,255,0.12)';
+    ctx.strokeStyle = i === 2 ? alertCol : 'rgba(255,255,255,0.12)';
     ctx.lineWidth = 2; ctx.stroke();
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
     ctx.font = '24px RobotoBold';
     ctx.textBaseline = 'top';
     ctx.fillText(k, x + cw / 2, sy + 22);
-    ctx.fillStyle = i === 2 ? ac : '#ffffff';
+    ctx.fillStyle = i === 2 ? alertCol : '#ffffff';
     ctx.font = '40px RobotoBold';
     fitText(ctx, v, x + 12, sy + 66, cw - 24, 40, 'center');
   });
