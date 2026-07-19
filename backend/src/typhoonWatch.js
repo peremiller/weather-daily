@@ -12,7 +12,12 @@
  * GDACS, and the card/message attribute it. No clickbait.
  */
 
-import { getParTiming, estimateParEntry, currentState } from './typhoonForecast.js';
+import {
+  getParTiming,
+  estimateParEntry,
+  currentState,
+  jmaActiveStorms,
+} from './typhoonForecast.js';
 
 const GDACS_URL =
   'https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP';
@@ -56,6 +61,34 @@ function parStatus(lon, lat) {
   // East of the 135°E boundary and within the latitude band → approaching.
   if (lon > 135 && lon <= 158 && lat >= 3 && lat <= 30) return 'approaching';
   return 'outside';
+}
+
+/**
+ * Attach PAR entry/exit timing to one system, then take its CURRENT position,
+ * status and intensity from the official forecast track (GDACS's own fix lags,
+ * and its severity is a lifetime peak). Best-effort; never throws.
+ */
+async function enrichSystem(s) {
+  try {
+    s.timing = (await getParTiming(s.name, s.lat, s.lon)) || estimateParEntry(s) || null;
+  } catch {
+    s.timing = estimateParEntry(s) || null;
+  }
+  const cs = currentState(s.timing);
+  if (cs && cs.pos) {
+    s.status = cs.status;
+    s.lat = Math.round(cs.pos.lat * 10) / 10;
+    s.lon = Math.round(cs.pos.lon * 10) / 10;
+    s.degToPAR = cs.status === 'approaching' ? Math.round((s.lon - 135) * 10) / 10 : 0;
+    if (cs.pos.windKph != null) {
+      const c = categorize(cs.pos.windKph);
+      s.maxWindKph = cs.pos.windKph;
+      s.maxWindMph = Math.round(cs.pos.windKph / 1.609);
+      s.category = c.cat;
+      s.catAbbr = c.abbr;
+    }
+  }
+  return s;
 }
 
 const cleanName = (n) => String(n || '').replace(/-\d{2}$/, ''); // "BAVI-26" -> "BAVI"
@@ -117,50 +150,51 @@ export async function getTyphoonWatch() {
           source: 'GDACS',
         };
       })
-      .filter(Boolean)
-      // Prefer inside-PAR over approaching, then higher alert, then stronger wind.
+      .filter(Boolean);
+
+    // SECOND, INDEPENDENT DETECTOR: GDACS can lag or drop a live storm (it
+    // dropped BAVI mid-event), so add anything JMA is tracking that's
+    // PAR-relevant and not already on the GDACS list.
+    for (const s of await jmaActiveStorms()) {
+      if (systems.some((x) => x.name === s.name)) continue;
+      const st = parStatus(s.lon, s.lat);
+      if (st === 'outside') continue;
+      systems.push({
+        active: true,
+        name: s.name,
+        localName: expectedLocalName(s.name),
+        category: 'Tropical Cyclone',
+        catAbbr: 'TC',
+        alert: null,
+        maxWindKph: null,
+        maxWindMph: null,
+        lat: Math.round(s.lat * 10) / 10,
+        lon: Math.round(s.lon * 10) / 10,
+        status: st,
+        degToPAR: st === 'approaching' ? Math.round((s.lon - 135) * 10) / 10 : 0,
+        source: 'JMA',
+      });
+    }
+
+    // Enrich EVERY system (not just the first) with timing + current state.
+    for (const s of systems) await enrichSystem(s);
+
+    // Keep only systems still relevant to the PH (drop ones that have exited),
+    // then rank: inside-PAR first, then strongest current winds, then alert.
+    const relevant = systems
+      .filter((s) => s.status === 'inside' || s.status === 'approaching')
       .sort((a, b) => {
         if (a.status !== b.status) return a.status === 'inside' ? -1 : 1;
-        const r = (alertRank[b.alert] || 0) - (alertRank[a.alert] || 0);
-        if (r) return r;
-        return (b.maxWindKph || 0) - (a.maxWindKph || 0);
+        const w = (b.maxWindKph || 0) - (a.maxWindKph || 0);
+        if (w) return w;
+        return (alertRank[b.alert] || 0) - (alertRank[a.alert] || 0);
       });
 
-    const value = systems[0] || { active: false };
-    // Attach PAR entry/exit timing: prefer the official JMA forecast track,
-    // fall back to a labelled kinematic estimate. Best-effort; never fatal.
-    if (value.active) {
-      try {
-        value.timing =
-          (await getParTiming(value.name, value.lat, value.lon)) ||
-          estimateParEntry(value) ||
-          null;
-      } catch {
-        value.timing = estimateParEntry(value) || null;
-      }
-
-      // GDACS's fix can lag hours behind (it stopped updating BAVI after PAR
-      // approach), so once we have an official forecast track, take the CURRENT
-      // position + in/out status from it interpolated to now — otherwise the
-      // card can say "approaching / not yet inside" after the entry time passed.
-      const cs = currentState(value.timing);
-      if (cs && cs.pos) {
-        value.status = cs.status;
-        value.lat = Math.round(cs.pos.lat * 10) / 10;
-        value.lon = Math.round(cs.pos.lon * 10) / 10;
-        value.degToPAR =
-          cs.status === 'approaching' ? Math.round((value.lon - 135) * 10) / 10 : 0;
-        // CURRENT intensity (10-min sustained, from the track) — not the GDACS
-        // lifetime peak — so category/winds downgrade as the storm weakens.
-        if (cs.pos.windKph != null) {
-          const c = categorize(cs.pos.windKph);
-          value.maxWindKph = cs.pos.windKph;
-          value.maxWindMph = Math.round(cs.pos.windKph / 1.609);
-          value.category = c.cat;
-          value.catAbbr = c.abbr;
-        }
-      }
-    }
+    // `all` carries every relevant storm; the top-level fields mirror the most
+    // significant one so existing single-storm callers keep working.
+    const value = relevant.length
+      ? { ...relevant[0], all: relevant }
+      : { active: false, all: [] };
     cache = { t: now, value };
     return value;
   } catch (err) {
@@ -168,6 +202,16 @@ export async function getTyphoonWatch() {
     cache = { t: now, value: null };
     return null;
   }
+}
+
+/**
+ * One line per ACTIVE system (so simultaneous typhoons are all reported), or []
+ * when nothing is inside/approaching PAR.
+ */
+export function typhoonWatchLines(t) {
+  if (!t) return [];
+  const list = t.all && t.all.length ? t.all : t.active ? [t] : [];
+  return list.map((s) => typhoonWatchLine(s)).filter(Boolean);
 }
 
 /** One-line summary for the text message, or null. */

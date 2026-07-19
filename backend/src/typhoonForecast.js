@@ -184,6 +184,37 @@ function parseJtwcWarning(txt, anchor) {
   return pts;
 }
 
+/**
+ * JMA's currently-tracked tropical cyclones with their analysis positions.
+ * Used as an INDEPENDENT detector: GDACS can lag or drop a live storm (it
+ * dropped BAVI mid-event), so anything JMA is tracking still gets captured.
+ * Returns [{ name, lat, lon }]; empty array on failure (never throws).
+ */
+export async function jmaActiveStorms() {
+  const out = [];
+  try {
+    const list = await fetchJson(JMA_LIST);
+    for (const item of Array.isArray(list) ? list : []) {
+      const tc = item.tropicalCyclone;
+      if (!tc) continue;
+      try {
+        const fc = await fetchJson(jmaForecastUrl(tc));
+        const title = (fc || []).find((p) => p.part === 'title');
+        const name = title && title.name && title.name.en && title.name.en.trim();
+        if (!name) continue;
+        const analysis = (fc || []).find((p) => p.advancedHours === 0 && Array.isArray(p.center));
+        if (!analysis) continue;
+        out.push({ name: name.toUpperCase(), lat: analysis.center[0], lon: analysis.center[1] });
+      } catch {
+        /* skip this storm */
+      }
+    }
+  } catch (err) {
+    console.error('[typhoon-forecast] JMA active list failed:', err.message);
+  }
+  return out;
+}
+
 // Pull the forecast track for a storm by international name (e.g. "BAVI").
 async function jmaTrack(intlName) {
   const target = String(intlName || '').trim().toLowerCase();

@@ -39,7 +39,7 @@ export async function sendDaily(weather) {
     /* skip panel on error */
   }
   const card = await safeDailyCard(weather);
-  const typhoonCard = await safeTyphoonCard(weather);
+  const typhoonCards = await safeTyphoonCards(weather);
   const results = [];
   for (const chatId of config.telegram.chatIds) {
     try {
@@ -50,9 +50,9 @@ export async function sendDaily(weather) {
         disable_web_page_preview: true,
       });
       if (card) await sendPhoto(chatId, card).catch((e) => console.error('[telegram card]', e.message));
-      // A typhoon postcard when a system is inside/approaching PAR.
-      if (typhoonCard) {
-        await sendPhoto(chatId, typhoonCard, `Typhoon Watch · ${weather.typhoon.category} ${weather.typhoon.name} · source GDACS`)
+      // One postcard per system inside/approaching PAR.
+      for (const { png, system } of typhoonCards) {
+        await sendPhoto(chatId, png, `Typhoon Watch · ${system.category} ${system.name} · source ${system.source}`)
           .catch((e) => console.error('[telegram typhoon card]', e.message));
       }
       results.push({ chatId, ok: true });
@@ -118,6 +118,25 @@ export async function safeTyphoonCard(weather) {
     console.error('[telegram] typhoon card render failed:', err.message);
     return null;
   }
+}
+
+/**
+ * One postcard per ACTIVE system, so simultaneous typhoons are all sent (not
+ * just the strongest). Returns [{ png, system }]; empty when nothing is near PAR.
+ */
+export async function safeTyphoonCards(weather) {
+  const t = weather.typhoon;
+  if (!t || !t.active) return [];
+  const list = t.all && t.all.length ? t.all : [t];
+  const out = [];
+  for (const s of list) {
+    try {
+      out.push({ png: await renderTyphoonCard(s, { tz: weather.timezone }), system: s });
+    } catch (err) {
+      console.error('[telegram] typhoon card render failed:', s.name, err.message);
+    }
+  }
+  return out;
 }
 
 /** Register the bot's command menu (the "/" / menu button in Telegram). */

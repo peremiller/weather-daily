@@ -1,6 +1,6 @@
 import { config } from './config.js';
 import { getTropicalCyclone } from './pagasa.js';
-import { getTyphoonWatch, typhoonWatchLine } from './typhoonWatch.js';
+import { getTyphoonWatch, typhoonWatchLines } from './typhoonWatch.js';
 
 /**
  * Open-Meteo client. No API key required.
@@ -547,11 +547,12 @@ export function formatMessage(w, format = 'plain') {
       : [];
   // Typhoon Watch: a system approaching PAR (or inside, if PAGASA hasn't named
   // it yet). Skip when PAGASA already has an active named cyclone above.
+  // One line PER system, so simultaneous typhoons are all reported.
   const tw = w.typhoon;
-  const twLine =
+  const twLines =
     tw && tw.active && (tw.status === 'approaching' || !(tc && tc.active))
-      ? typhoonWatchLine(tw)
-      : null;
+      ? typhoonWatchLines(tw)
+      : [];
 
   // Footer bits for PH: clear-status note + the GFS/PAGASA source line.
   const phFooter = [];
@@ -562,7 +563,7 @@ export function formatMessage(w, format = 'plain') {
     `${cur.emoji} Weather for ${w.location.name}`,
     '',
     ...tcAlert,
-    ...(twLine ? [twLine, ''] : []),
+    ...(twLines.length ? [...twLines, ''] : []),
     `${cur.emoji} Now: ${Math.round(w.current.temp)}${t} (feels ${Math.round(w.current.feelsLike)}${t}) — ${cur.label}`,
     `${today.emoji} Today: ${today.label}`,
     `🌡️ High ${Math.round(w.today.tempMax)}${t} / Low ${Math.round(w.today.tempMin)}${t}`,

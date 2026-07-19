@@ -127,11 +127,10 @@ async function sendForecastFor(chatId, loc) {
   if (card) {
     await telegram.sendPhoto(chatId, card).catch((e) => console.error('[telegram card]', e.message));
   }
-  // Typhoon postcard when a system is inside/approaching PAR.
-  const typhoonCard = await telegram.safeTyphoonCard(weather);
-  if (typhoonCard) {
+  // One typhoon postcard per system inside/approaching PAR.
+  for (const { png, system } of await telegram.safeTyphoonCards(weather)) {
     await telegram
-      .sendPhoto(chatId, typhoonCard, `Typhoon Watch · ${weather.typhoon.category} ${weather.typhoon.name} · source GDACS`)
+      .sendPhoto(chatId, png, `Typhoon Watch · ${system.category} ${system.name} · source ${system.source}`)
       .catch((e) => console.error('[telegram typhoon card]', e.message));
   }
 }
