@@ -8,6 +8,7 @@ dotenv.config();
  */
 export const config = {
   port: Number(process.env.PORT) || 3000,
+  isVercel: Boolean(process.env.VERCEL),
 
   // Where/when to report weather.
   location: {
@@ -32,6 +33,9 @@ export const config = {
   telegram: {
     enabled: Boolean(process.env.TELEGRAM_BOT_TOKEN),
     token: process.env.TELEGRAM_BOT_TOKEN || '',
+    // Telegram includes this value in X-Telegram-Bot-Api-Secret-Token for
+    // webhook requests. Keep it random and store it only as a host secret.
+    webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET || '',
     // Comma-separated list of chat IDs to broadcast to.
     chatIds: (process.env.TELEGRAM_CHAT_IDS || '')
       .split(',')
@@ -79,7 +83,15 @@ export const config = {
   },
 
   // Public base URL of this server (used when registering webhooks).
-  publicUrl: process.env.PUBLIC_URL || '',
+  publicUrl:
+    process.env.PUBLIC_URL ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : ''),
+
+  // Vercel sends this value as "Authorization: Bearer <CRON_SECRET>" when
+  // invoking cron routes.
+  cronSecret: process.env.CRON_SECRET || '',
 };
 
 /** Returns the list of channels that are configured and ready to send. */

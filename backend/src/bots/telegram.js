@@ -155,6 +155,30 @@ export async function registerCommands() {
   }
 }
 
+/**
+ * Point Telegram at the production HTTPS webhook. Telegram webhooks and
+ * getUpdates polling are mutually exclusive, so this replaces long polling on
+ * Vercel. The optional secret lets the app reject forged webhook requests.
+ */
+export async function registerWebhook(publicUrl = config.publicUrl) {
+  if (!config.telegram.enabled) return { skipped: true, reason: 'token_missing' };
+  if (!publicUrl) return { skipped: true, reason: 'public_url_missing' };
+
+  const baseUrl = publicUrl.replace(/\/+$/, '');
+  const payload = {
+    url: `${baseUrl}/webhook/telegram`,
+    allowed_updates: ['message', 'edited_message'],
+    drop_pending_updates: false,
+  };
+  if (config.telegram.webhookSecret) {
+    payload.secret_token = config.telegram.webhookSecret;
+  }
+
+  await call('setWebhook', payload);
+  console.log(`[telegram] Webhook registered: ${baseUrl}/webhook/telegram`);
+  return { ok: true, url: `${baseUrl}/webhook/telegram` };
+}
+
 /** Send a PNG buffer as a photo message. */
 export async function sendPhoto(chatId, pngBuffer, caption) {
   const form = new FormData();
