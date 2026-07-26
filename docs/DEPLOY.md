@@ -1,7 +1,24 @@
-# Deploying the backend (always-on)
+# Deploying the backend
 
 Your daily message only sends while the backend process is **running and awake**.
 Your laptop won't do for a reliable 7 AM send — host it somewhere always-on.
+
+## Option A — Vercel (recommended for this bot)
+
+Vercel does not keep a polling process alive. This repository therefore uses
+Telegram's HTTPS webhook on Vercel and a Vercel Cron Job for the daily message.
+
+1. Import the GitHub repository into Vercel.
+2. Set **Root Directory** to `backend`.
+3. Add the Telegram secrets from `backend/.env.example`, including a random
+   `TELEGRAM_WEBHOOK_SECRET` and `CRON_SECRET`.
+4. Add Upstash Redis from Vercel's Storage marketplace so saved user locations
+   persist across function instances.
+5. Deploy production, then open the production `/` health endpoint. It
+   automatically registers the Telegram webhook.
+
+The included `vercel.json` runs the daily forecast at 23:00 UTC (07:00 in the
+Philippines). On Vercel Hobby, a daily cron can run within the following hour.
 
 > ⚠️ **The #1 gotcha:** free tiers that "sleep on inactivity" (Render Free,
 > some others) will **not fire the cron** while asleep. Use a plan/host that
@@ -11,7 +28,7 @@ The repo already includes: `Dockerfile`, `.dockerignore`, `render.yaml`, `Procfi
 
 ---
 
-## Option A — Railway (easiest, stays awake)
+## Option B — Railway (always-on, paid)
 
 1. Push this project to GitHub.
 2. https://railway.app → **New Project → Deploy from GitHub repo**.
@@ -23,7 +40,7 @@ The repo already includes: `Dockerfile`, `.dockerignore`, `render.yaml`, `Procfi
 
 Railway doesn't sleep; you pay for usage (small for this app).
 
-## Option B — Render (use the *starter* plan, not free)
+## Option C — Render (use the *starter* plan, not free)
 
 1. Push to GitHub.
 2. https://render.com → **New → Blueprint**, select the repo. It reads
@@ -34,7 +51,7 @@ Railway doesn't sleep; you pay for usage (small for this app).
 > The `render.yaml` sets `plan: starter` on purpose — the **free** web plan
 > sleeps and the 7 AM cron would silently not run.
 
-## Option C — Fly.io
+## Option D — Fly.io
 
 ```bash
 cd backend
@@ -44,7 +61,7 @@ fly deploy
 ```
 Set `min_machines_running = 1` in `fly.toml` so it never scales to zero.
 
-## Option D — Any VPS (full control)
+## Option E — Any VPS (full control)
 
 ```bash
 # on the server
@@ -56,7 +73,7 @@ pm2 start src/index.js --name weather-daily
 pm2 save && pm2 startup                # survive reboots
 ```
 
-## Option E — Docker (anywhere)
+## Option F — Docker (anywhere)
 
 ```bash
 cd backend
