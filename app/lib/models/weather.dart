@@ -136,6 +136,60 @@ class DailyForecast {
   }
 }
 
+/// One hour in the short-term (next-24h) forecast strip.
+class HourlyForecast {
+  final DateTime time;
+  final double temp;
+  final int code;
+  final int precipProbability;
+
+  HourlyForecast({
+    required this.time,
+    required this.temp,
+    required this.code,
+    required this.precipProbability,
+  });
+
+  WeatherCode get weather => WeatherCode.from(code);
+
+  /// Rain-consistent icon (same rule the daily rows use).
+  IconData get displayIcon {
+    const snow = {71, 73, 75, 77, 85, 86};
+    const storm = {95, 96, 99};
+    if (snow.contains(code) || storm.contains(code)) return weather.icon;
+    if (precipProbability >= 70) return Icons.cloudy_snowing;
+    if (precipProbability >= 40) return Icons.water_drop_rounded;
+    return weather.icon;
+  }
+}
+
+/// US Air Quality Index bucket — label + color, mirroring EPA bands.
+class AirQuality {
+  final int usAqi;
+  final double? pm25;
+  const AirQuality(this.usAqi, this.pm25);
+
+  String get label {
+    final a = usAqi;
+    if (a <= 50) return 'Good';
+    if (a <= 100) return 'Moderate';
+    if (a <= 150) return 'Unhealthy (sensitive)';
+    if (a <= 200) return 'Unhealthy';
+    if (a <= 300) return 'Very unhealthy';
+    return 'Hazardous';
+  }
+
+  Color get color {
+    final a = usAqi;
+    if (a <= 50) return const Color(0xFF2ECC71);
+    if (a <= 100) return const Color(0xFFF1C40F);
+    if (a <= 150) return const Color(0xFFE67E22);
+    if (a <= 200) return const Color(0xFFE74C3C);
+    if (a <= 300) return const Color(0xFF9B59B6);
+    return const Color(0xFF7D3C98);
+  }
+}
+
 /// The full weather snapshot shown on the home screen.
 class Weather {
   final String locationName;
@@ -150,11 +204,21 @@ class Weather {
   final DateTime sunrise;
   final DateTime sunset;
   final List<DailyForecast> daily;
+  final List<HourlyForecast> hourly;
   final String unitSymbol;
   final String now; // local ISO of "now", for rain-timing phrasing
   final RainOutlook? rain;
   final DateTime? tomorrowSunrise;
   final DateTime? tomorrowSunset;
+  // Richer "now" metrics (best-app parity). Nullable: hidden when unavailable.
+  final double? windGusts;
+  final int? windDirection; // degrees, 0 = N
+  final double? pressure; // hPa
+  final double? uvIndexNow; // current-hour UV
+  final double? uvIndexMax; // today's peak UV
+  final double? dewPoint;
+  final double? visibilityKm;
+  final AirQuality? air;
 
   Weather({
     required this.locationName,
@@ -171,12 +235,39 @@ class Weather {
     required this.daily,
     required this.unitSymbol,
     required this.now,
+    this.hourly = const [],
     this.rain,
     this.tomorrowSunrise,
     this.tomorrowSunset,
+    this.windGusts,
+    this.windDirection,
+    this.pressure,
+    this.uvIndexNow,
+    this.uvIndexMax,
+    this.dewPoint,
+    this.visibilityKm,
+    this.air,
   });
 
   WeatherCode get weather => WeatherCode.from(code);
+
+  /// Compass label for a wind bearing, e.g. 200° -> "SSW".
+  static String compass(int deg) {
+    const dirs = [
+      'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+      'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'
+    ];
+    return dirs[(((deg % 360) / 22.5) + 0.5).floor() % 16];
+  }
+
+  /// UV exposure band label for an index value.
+  static String uvLabel(double uv) {
+    if (uv < 3) return 'Low';
+    if (uv < 6) return 'Moderate';
+    if (uv < 8) return 'High';
+    if (uv < 11) return 'Very high';
+    return 'Extreme';
+  }
 
   /// The 3 upcoming days (tomorrow onward) with the lowest rain chance, ranked.
   List<DailyForecast> get driestDays {
@@ -191,8 +282,9 @@ class Weather {
   factory Weather.fromOpenMeteo(
     Map<String, dynamic> json,
     String locationName,
-    String unitSymbol,
-  ) {
+    String unitSymbol, {
+    Map<String, dynamic>? air,
+  }) {
     final current = json['current'] as Map<String, dynamic>;
     final daily = json['daily'] as Map<String, dynamic>;
     final hourly = json['hourly'] as Map<String, dynamic>?;
@@ -204,6 +296,7 @@ class Weather {
     final maxes = (daily['temperature_2m_max'] as List).cast<num>();
     final mins = (daily['temperature_2m_min'] as List).cast<num>();
     final precs = (daily['precipitation_probability_max'] as List);
+    final uvMaxes = daily['uv_index_max'] as List?;
 
     final forecasts = <DailyForecast>[];
     for (var i = 0; i < times.length; i++) {
@@ -218,6 +311,63 @@ class Weather {
       ));
     }
 
+    final nowIso = current['time'] as String?;
+
+    // Index of the hour bucket containing "now" (last hour <= current time),
+    // used both for the current-hour metrics and the strip's starting point.
+    int nowIndex = 0;
+    final hTimes = (hourly?['time'] as List?)?.cast<String>();
+    if (hTimes != null && nowIso != null) {
+      for (var i = 0; i < hTimes.length; i++) {
+        if (hTimes[i].compareTo(nowIso) <= 0) {
+          nowIndex = i;
+        } else {
+          break;
+        }
+      }
+    }
+
+    double? hourlyAt(String key) {
+      final arr = hourly?[key] as List?;
+      if (arr == null || nowIndex >= arr.length) return null;
+      final v = arr[nowIndex];
+      return v is num ? v.toDouble() : null;
+    }
+
+    // Next-24h strip: temp + icon + rain% per hour, starting at the next hour.
+    final strip = <HourlyForecast>[];
+    if (hTimes != null) {
+      final temps = hourly?['temperature_2m'] as List?;
+      final hCodes = hourly?['weather_code'] as List?;
+      final hProbs = hourly?['precipitation_probability'] as List?;
+      for (var i = nowIndex; i < hTimes.length && strip.length < 24; i++) {
+        final t = temps != null && i < temps.length ? temps[i] : null;
+        if (t is! num) continue;
+        strip.add(HourlyForecast(
+          time: DateTime.parse(hTimes[i]),
+          temp: t.toDouble(),
+          code: hCodes != null && i < hCodes.length && hCodes[i] is num
+              ? (hCodes[i] as num).toInt()
+              : 0,
+          precipProbability:
+              hProbs != null && i < hProbs.length && hProbs[i] is num
+                  ? (hProbs[i] as num).toInt()
+                  : 0,
+        ));
+      }
+    }
+
+    AirQuality? airQuality;
+    final aqCur = air?['current'] as Map<String, dynamic>?;
+    if (aqCur != null && aqCur['us_aqi'] is num) {
+      airQuality = AirQuality(
+        (aqCur['us_aqi'] as num).round(),
+        (aqCur['pm2_5'] as num?)?.toDouble(),
+      );
+    }
+
+    final vis = hourlyAt('visibility');
+
     return Weather(
       locationName: locationName,
       temperature: (current['temperature_2m'] as num).toDouble(),
@@ -231,6 +381,7 @@ class Weather {
       sunrise: parse((daily['sunrise'] as List)[0]),
       sunset: parse((daily['sunset'] as List)[0]),
       daily: forecasts,
+      hourly: strip,
       unitSymbol: unitSymbol,
       now: current['time'] as String,
       tomorrowSunrise: (daily['sunrise'] as List).length > 1
@@ -239,6 +390,16 @@ class Weather {
       tomorrowSunset: (daily['sunset'] as List).length > 1
           ? parse((daily['sunset'] as List)[1])
           : null,
+      windGusts: (current['wind_gusts_10m'] as num?)?.toDouble(),
+      windDirection: (current['wind_direction_10m'] as num?)?.round(),
+      pressure: (current['surface_pressure'] as num?)?.toDouble(),
+      uvIndexNow: hourlyAt('uv_index'),
+      uvIndexMax: uvMaxes != null && uvMaxes.isNotEmpty && uvMaxes[0] is num
+          ? (uvMaxes[0] as num).toDouble()
+          : null,
+      dewPoint: hourlyAt('dew_point_2m'),
+      visibilityKm: vis != null ? vis / 1000.0 : null,
+      air: airQuality,
       rain: RainOutlook.fromHourly(
         json['hourly'] as Map<String, dynamic>?,
         current['time'] as String?,

@@ -17,6 +17,8 @@ class Place {
 class WeatherService {
   static const _geocodeUrl = 'https://geocoding-api.open-meteo.com/v1/search';
   static const _forecastUrl = 'https://api.open-meteo.com/v1/forecast';
+  static const _airQualityUrl =
+      'https://air-quality-api.open-meteo.com/v1/air-quality';
 
   final String temperatureUnit; // 'celsius' | 'fahrenheit'
   final String windUnit; // 'kmh' | 'mph' | 'ms' | 'kn'
@@ -69,16 +71,23 @@ class WeatherService {
     return 'My location';
   }
 
-  /// Fetch the full forecast (current + 7 days) for a place.
+  /// Fetch the full forecast (current + 7 days) for a place, plus air quality.
   Future<Weather> getWeather(double lat, double lon, String placeName) async {
     final uri = Uri.parse(_forecastUrl).replace(queryParameters: {
       'latitude': '$lat',
       'longitude': '$lon',
       'current':
-          'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m',
+          'temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,'
+              'wind_speed_10m,wind_gusts_10m,wind_direction_10m,surface_pressure,'
+              'is_day',
       'daily':
-          'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset',
-      'hourly': 'precipitation,precipitation_probability,weather_code',
+          'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,'
+              'sunrise,sunset,uv_index_max',
+      // temperature_2m + weather_code drive the hourly strip; uv/visibility/
+      // dew_point feed the "now" detail tiles (read at the current hour).
+      'hourly':
+          'temperature_2m,precipitation,precipitation_probability,weather_code,'
+              'uv_index,visibility,dew_point_2m',
       'timezone': 'auto',
       'temperature_unit': temperatureUnit,
       'wind_speed_unit': windUnit,
@@ -89,12 +98,33 @@ class WeatherService {
       // hour. See _blendModels().
       'models': _models.join(','),
     });
-    final res = await http.get(uri);
+    // Air quality is a separate Open-Meteo endpoint; fetch it in parallel and
+    // treat any failure as "unknown" (the AQI tile just hides itself).
+    final aqUri = Uri.parse(_airQualityUrl).replace(queryParameters: {
+      'latitude': '$lat',
+      'longitude': '$lon',
+      'current': 'us_aqi,pm2_5',
+      'timezone': 'auto',
+    });
+
+    final results = await Future.wait([
+      http.get(uri),
+      http.get(aqUri).catchError((_) => http.Response('{}', 599)),
+    ]);
+    final res = results[0];
     if (res.statusCode != 200) {
       throw Exception('Forecast failed (${res.statusCode})');
     }
     final data = _blendModels(jsonDecode(res.body) as Map<String, dynamic>);
-    return Weather.fromOpenMeteo(data, placeName, unitSymbol);
+
+    Map<String, dynamic>? air;
+    final aqRes = results[1];
+    if (aqRes.statusCode == 200) {
+      try {
+        air = jsonDecode(aqRes.body) as Map<String, dynamic>;
+      } catch (_) {/* leave air null */}
+    }
+    return Weather.fromOpenMeteo(data, placeName, unitSymbol, air: air);
   }
 
   // Models to average. `best_match` is Open-Meteo's multi-source blend; GFS is
@@ -154,6 +184,7 @@ class WeatherService {
       'temperature_2m_min': avg('temperature_2m_min', d),
       'sunrise': primary('sunrise', d),
       'sunset': primary('sunset', d),
+      'uv_index_max': avg('uv_index_max', d),
       'precipitation_probability_max': List.generate(dates.length, (i) {
         return day.prob[dates[i]] ?? ((probFallback[i] ?? 0).round());
       }),
@@ -168,6 +199,13 @@ class WeatherService {
     data['hourly'] = {
       'time': h['time'],
       'precipitation': avg('precipitation', h),
+      'precipitation_probability': avg('precipitation_probability', h),
+      'temperature_2m': avg('temperature_2m', h),
+      'uv_index': avg('uv_index', h),
+      'dew_point_2m': avg('dew_point_2m', h),
+      'visibility': avg('visibility', h),
+      // First model's codes are enough to pick hourly-strip icons.
+      'weather_code': primary('weather_code', h),
     };
     // `current` is a single nowcast even with models=, so leave it untouched.
     return data;

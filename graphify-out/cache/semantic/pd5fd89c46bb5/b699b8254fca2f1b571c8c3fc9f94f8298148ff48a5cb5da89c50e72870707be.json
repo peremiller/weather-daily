@@ -1,0 +1,1 @@
+{"nodes": [], "edges": [{"source": "app_analysis_options_flutter_lints", "target": "app_pubspec_flutter_manifest", "relation": "references", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "app/analysis_options.yaml", "source_location": null, "weight": 1.0}], "hyperedges": []}

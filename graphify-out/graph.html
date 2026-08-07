@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>graphify - graphify-out/graph.html</title>
+<script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"
+        integrity="sha384-Ux6phic9PEHJ38YtrijhkzyJ8yQlH8i/+buBR8s3mAZOJrP1gwyvAcIYl3GWtpX1"
+        crossorigin="anonymous"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f0f1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; height: 100vh; overflow: hidden; }
+  #graph { flex: 1; }
+  #sidebar { width: 280px; background: #1a1a2e; border-left: 1px solid #2a2a4e; display: flex; flex-direction: column; overflow: hidden; }
+  #search-wrap { padding: 12px; border-bottom: 1px solid #2a2a4e; }
+  #search { width: 100%; background: #0f0f1a; border: 1px solid #3a3a5e; color: #e0e0e0; padding: 7px 10px; border-radius: 6px; font-size: 13px; outline: none; }
+  #search:focus { border-color: #4E79A7; }
+  #search-results { max-height: 140px; overflow-y: auto; padding: 4px 12px; border-bottom: 1px solid #2a2a4e; display: none; }
+  .search-item { padding: 4px 6px; cursor: pointer; border-radius: 4px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .search-item:hover { background: #2a2a4e; }
+  #info-panel { padding: 14px; border-bottom: 1px solid #2a2a4e; min-height: 140px; }
+  #info-panel h3 { font-size: 13px; color: #aaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+  #info-content { font-size: 13px; color: #ccc; line-height: 1.6; }
+  #info-content .field { margin-bottom: 5px; }
+  #info-content .field b { color: #e0e0e0; }
+  #info-content .empty { color: #555; font-style: italic; }
+  .neighbor-link { display: block; padding: 2px 6px; margin: 2px 0; border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid #333; }
+  .neighbor-link:hover { background: #2a2a4e; }
+  #neighbors-list { max-height: 160px; overflow-y: auto; margin-top: 4px; }
+  #legend-wrap { flex: 1; overflow-y: auto; padding: 12px; }
+  #legend-wrap h3 { font-size: 13px; color: #aaa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .legend-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; border-radius: 4px; font-size: 12px; }
+  .legend-item:hover { background: #2a2a4e; padding-left: 4px; }
+  .legend-item.dimmed { opacity: 0.35; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .legend-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .legend-count { color: #666; font-size: 11px; }
+  #stats { padding: 10px 14px; border-top: 1px solid #2a2a4e; font-size: 11px; color: #555; }
+  #legend-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 4px 0; }
+  #legend-controls label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: #aaa; user-select: none; }
+  #legend-controls label:hover { color: #e0e0e0; }
+  .legend-cb, #select-all-cb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; border: 1.5px solid #3a3a5e; border-radius: 3px; background: #0f0f1a; cursor: pointer; position: relative; flex-shrink: 0; }
+  .legend-cb:checked, #select-all-cb:checked { background: #4E79A7; border-color: #4E79A7; }
+  .legend-cb:checked::after, #select-all-cb:checked::after { content: ''; position: absolute; left: 3.5px; top: 1px; width: 4px; height: 7px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  #select-all-cb:indeterminate { background: #4E79A7; border-color: #4E79A7; }
+  #select-all-cb:indeterminate::after { content: ''; position: absolute; left: 2px; top: 5px; width: 8px; height: 2px; background: #fff; border: none; transform: none; }
+</style>
+</head>
+<body>
+<div id="graph"></div>
+<div id="sidebar">
+  <div id="search-wrap">
+    <input id="search" type="text" placeholder="Search nodes..." autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+  <div id="info-panel">
+    <h3>Node Info</h3>
+    <div id="info-content"><span class="empty">Click a node to inspect it</span></div>
+  </div>
+  <div id="legend-wrap">
+    <h3>Communities</h3>
+    <div id="legend-controls">
+      <label><input type="checkbox" id="select-all-cb" checked onchange="toggleAllCommunities(!this.checked)">Select All</label>
+    </div>
+    <div id="legend"></div>
+  </div>
+  <div id="stats">78 nodes &middot; 36 edges &middot; 55 communities</div>
+</div>
+<script>
+const RAW_NODES = [{"id": "backend_src_bots_messenger_senddaily", "label": "sendDaily", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "sendDaily", "community": 5, "community_name": "sendDaily", "source_file": "backend/src/bots/messenger.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_messenger_sendtext", "label": "sendText", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "sendText", "community": 6, "community_name": "sendText", "source_file": "backend/src/bots/messenger.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_telegram_senddaily", "label": "sendDaily", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "sendDaily", "community": 13, "community_name": "sendDaily", "source_file": "backend/src/bots/telegram.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_telegram_sendtext", "label": "sendText", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "sendText", "community": 15, "community_name": "sendText", "source_file": "backend/src/bots/telegram.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_telegram_safecard", "label": "safeCard", "color": {"background": "#BAB0AC", "border": "#BAB0AC", "highlight": {"background": "#ffffff", "border": "#BAB0AC"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "safeCard", "community": 9, "community_name": "safeCard", "source_file": "backend/src/bots/telegram.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_telegram_safedailycard", "label": "safeDailyCard", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "safeDailyCard", "community": 10, "community_name": "safeDailyCard", "source_file": "backend/src/bots/telegram.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_telegram_safetyphooncard", "label": "safeTyphoonCard", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "safeTyphoonCard", "community": 11, "community_name": "safeTyphoonCard", "source_file": "backend/src/bots/telegram.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_telegram_safetyphooncards", "label": "safeTyphoonCards", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "safeTyphoonCards", "community": 12, "community_name": "safeTyphoonCards", "source_file": "backend/src/bots/telegram.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_telegram_registercommands", "label": "registerCommands", "color": {"background": "#9C755F", "border": "#9C755F", "highlight": {"background": "#ffffff", "border": "#9C755F"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "registerCommands", "community": 8, "community_name": "registerCommands", "source_file": "backend/src/bots/telegram.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_telegram_sendphoto", "label": "sendPhoto", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "sendPhoto", "community": 14, "community_name": "sendPhoto", "source_file": "backend/src/bots/telegram.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_telegram_deletewebhook", "label": "deleteWebhook", "color": {"background": "#FF9DA7", "border": "#FF9DA7", "highlight": {"background": "#ffffff", "border": "#FF9DA7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "deleteWebhook", "community": 7, "community_name": "deleteWebhook", "source_file": "backend/src/bots/telegram.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_telegram_startpolling", "label": "startPolling", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "startPolling", "community": 16, "community_name": "startPolling", "source_file": "backend/src/bots/telegram.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_viber_setwebhook", "label": "setWebhook", "color": {"background": "#BAB0AC", "border": "#BAB0AC", "highlight": {"background": "#ffffff", "border": "#BAB0AC"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "setWebhook", "community": 19, "community_name": "setWebhook", "source_file": "backend/src/bots/viber.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_viber_senddaily", "label": "sendDaily", "color": {"background": "#FF9DA7", "border": "#FF9DA7", "highlight": {"background": "#ffffff", "border": "#FF9DA7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "sendDaily", "community": 17, "community_name": "sendDaily", "source_file": "backend/src/bots/viber.js", "file_type": "code", "degree": 0}, {"id": "backend_src_bots_viber_sendtext", "label": "sendText", "color": {"background": "#9C755F", "border": "#9C755F", "highlight": {"background": "#ffffff", "border": "#9C755F"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "sendText", "community": 18, "community_name": "sendText", "source_file": "backend/src/bots/viber.js", "file_type": "code", "degree": 0}, {"id": "backend_src_broadcast_broadcastdaily", "label": "broadcastDaily", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "broadcastDaily", "community": 20, "community_name": "broadcastDaily", "source_file": "backend/src/broadcast.js", "file_type": "code", "degree": 0}, {"id": "backend_src_config_enabledchannels", "label": "enabledChannels", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "enabledChannels", "community": 21, "community_name": "enabledChannels", "source_file": "backend/src/config.js", "file_type": "code", "degree": 0}, {"id": "backend_src_dailypostcard_buildpostcardhtml", "label": "buildPostcardHTML", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "buildPostcardHTML", "community": 22, "community_name": "buildPostcardHTML", "source_file": "backend/src/dailyPostcard.js", "file_type": "code", "degree": 0}, {"id": "backend_src_dailypostcard_renderpostcardpng", "label": "renderPostcardPNG", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "renderPostcardPNG", "community": 23, "community_name": "renderPostcardPNG", "source_file": "backend/src/dailyPostcard.js", "file_type": "code", "degree": 0}, {"id": "backend_src_index_handletelegrammessage", "label": "handleTelegramMessage", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "handleTelegramMessage", "community": 24, "community_name": "handleTelegramMessage", "source_file": "backend/src/index.js", "file_type": "code", "degree": 0}, {"id": "backend_src_ownerreport_sendownerreport", "label": "sendOwnerReport", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "sendOwnerReport", "community": 25, "community_name": "sendOwnerReport", "source_file": "backend/src/ownerReport.js", "file_type": "code", "degree": 0}, {"id": "backend_src_pagasa_gettropicalcyclone", "label": "getTropicalCyclone", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "getTropicalCyclone", "community": 26, "community_name": "getTropicalCyclone", "source_file": "backend/src/pagasa.js", "file_type": "code", "degree": 0}, {"id": "backend_src_pagasatenday_getpagasatenday", "label": "getPagasaTenDay", "color": {"background": "#FF9DA7", "border": "#FF9DA7", "highlight": {"background": "#ffffff", "border": "#FF9DA7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "getPagasaTenDay", "community": 27, "community_name": "getPagasaTenDay", "source_file": "backend/src/pagasaTenDay.js", "file_type": "code", "degree": 0}, {"id": "backend_src_pagasatenday_pagasatendaypanel", "label": "pagasaTenDayPanel", "color": {"background": "#9C755F", "border": "#9C755F", "highlight": {"background": "#ffffff", "border": "#9C755F"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "pagasaTenDayPanel", "community": 28, "community_name": "pagasaTenDayPanel", "source_file": "backend/src/pagasaTenDay.js", "file_type": "code", "degree": 0}, {"id": "backend_src_scheduler_startscheduler", "label": "startScheduler", "color": {"background": "#BAB0AC", "border": "#BAB0AC", "highlight": {"background": "#ffffff", "border": "#BAB0AC"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "startScheduler", "community": 29, "community_name": "startScheduler", "source_file": "backend/src/scheduler.js", "file_type": "code", "degree": 0}, {"id": "backend_src_store_addsubscriber", "label": "addSubscriber", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "addSubscriber", "community": 30, "community_name": "addSubscriber", "source_file": "backend/src/store.js", "file_type": "code", "degree": 0}, {"id": "backend_src_store_removesubscriber", "label": "removeSubscriber", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "removeSubscriber", "community": 34, "community_name": "removeSubscriber", "source_file": "backend/src/store.js", "file_type": "code", "degree": 0}, {"id": "backend_src_store_getsubscribers", "label": "getSubscribers", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "getSubscribers", "community": 32, "community_name": "getSubscribers", "source_file": "backend/src/store.js", "file_type": "code", "degree": 0}, {"id": "backend_src_store_setuserlocation", "label": "setUserLocation", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "setUserLocation", "community": 35, "community_name": "setUserLocation", "source_file": "backend/src/store.js", "file_type": "code", "degree": 0}, {"id": "backend_src_store_getuserlocation", "label": "getUserLocation", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "getUserLocation", "community": 33, "community_name": "getUserLocation", "source_file": "backend/src/store.js", "file_type": "code", "degree": 0}, {"id": "backend_src_store_getalluserlocations", "label": "getAllUserLocations", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "getAllUserLocations", "community": 31, "community_name": "getAllUserLocations", "source_file": "backend/src/store.js", "file_type": "code", "degree": 0}, {"id": "backend_src_typhooncard_rendertyphooncard", "label": "renderTyphoonCard", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "renderTyphoonCard", "community": 36, "community_name": "renderTyphoonCard", "source_file": "backend/src/typhoonCard.js", "file_type": "code", "degree": 0}, {"id": "backend_src_typhoonforecast_jmaactivestorms", "label": "jmaActiveStorms", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "jmaActiveStorms", "community": 40, "community_name": "jmaActiveStorms", "source_file": "backend/src/typhoonForecast.js", "file_type": "code", "degree": 0}, {"id": "backend_src_typhoonforecast_positionat", "label": "positionAt", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "positionAt", "community": 41, "community_name": "positionAt", "source_file": "backend/src/typhoonForecast.js", "file_type": "code", "degree": 0}, {"id": "backend_src_typhoonforecast_currentstate", "label": "currentState", "color": {"background": "#FF9DA7", "border": "#FF9DA7", "highlight": {"background": "#ffffff", "border": "#FF9DA7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "currentState", "community": 37, "community_name": "currentState", "source_file": "backend/src/typhoonForecast.js", "file_type": "code", "degree": 0}, {"id": "backend_src_typhoonforecast_getpartiming", "label": "getParTiming", "color": {"background": "#BAB0AC", "border": "#BAB0AC", "highlight": {"background": "#ffffff", "border": "#BAB0AC"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "getParTiming", "community": 39, "community_name": "getParTiming", "source_file": "backend/src/typhoonForecast.js", "file_type": "code", "degree": 0}, {"id": "backend_src_typhoonforecast_estimateparentry", "label": "estimateParEntry", "color": {"background": "#9C755F", "border": "#9C755F", "highlight": {"background": "#ffffff", "border": "#9C755F"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "estimateParEntry", "community": 38, "community_name": "estimateParEntry", "source_file": "backend/src/typhoonForecast.js", "file_type": "code", "degree": 0}, {"id": "backend_src_typhoonwatch_gettyphoonwatch", "label": "getTyphoonWatch", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "getTyphoonWatch", "community": 42, "community_name": "getTyphoonWatch", "source_file": "backend/src/typhoonWatch.js", "file_type": "code", "degree": 0}, {"id": "backend_src_typhoonwatch_typhoonwatchlines", "label": "typhoonWatchLines", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "typhoonWatchLines", "community": 44, "community_name": "typhoonWatchLines", "source_file": "backend/src/typhoonWatch.js", "file_type": "code", "degree": 0}, {"id": "backend_src_typhoonwatch_typhoonwatchline", "label": "typhoonWatchLine", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "typhoonWatchLine", "community": 43, "community_name": "typhoonWatchLine", "source_file": "backend/src/typhoonWatch.js", "file_type": "code", "degree": 0}, {"id": "backend_src_weather_describecode", "label": "describeCode", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "describeCode", "community": 46, "community_name": "describeCode", "source_file": "backend/src/weather.js", "file_type": "code", "degree": 0}, {"id": "backend_src_weather_dailyemoji", "label": "dailyEmoji", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "dailyEmoji", "community": 45, "community_name": "dailyEmoji", "source_file": "backend/src/weather.js", "file_type": "code", "degree": 0}, {"id": "backend_src_weather_geocode", "label": "geocode", "color": {"background": "#9C755F", "border": "#9C755F", "highlight": {"background": "#ffffff", "border": "#9C755F"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "geocode", "community": 48, "community_name": "geocode", "source_file": "backend/src/weather.js", "file_type": "code", "degree": 0}, {"id": "backend_src_weather_resolvelocation", "label": "resolveLocation", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "resolveLocation", "community": 52, "community_name": "resolveLocation", "source_file": "backend/src/weather.js", "file_type": "code", "degree": 0}, {"id": "backend_src_weather_isphilippines", "label": "isPhilippines", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "isPhilippines", "community": 51, "community_name": "isPhilippines", "source_file": "backend/src/weather.js", "file_type": "code", "degree": 0}, {"id": "backend_src_weather_getforecast", "label": "getForecast", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "getForecast", "community": 50, "community_name": "getForecast", "source_file": "backend/src/weather.js", "file_type": "code", "degree": 0}, {"id": "backend_src_weather_getdailyweather", "label": "getDailyWeather", "color": {"background": "#BAB0AC", "border": "#BAB0AC", "highlight": {"background": "#ffffff", "border": "#BAB0AC"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "getDailyWeather", "community": 49, "community_name": "getDailyWeather", "source_file": "backend/src/weather.js", "file_type": "code", "degree": 0}, {"id": "backend_src_weather_reversegeocode", "label": "reverseGeocode", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "reverseGeocode", "community": 53, "community_name": "reverseGeocode", "source_file": "backend/src/weather.js", "file_type": "code", "degree": 0}, {"id": "backend_src_weather_formatmessage", "label": "formatMessage", "color": {"background": "#FF9DA7", "border": "#FF9DA7", "highlight": {"background": "#ffffff", "border": "#FF9DA7"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "formatMessage", "community": 47, "community_name": "formatMessage", "source_file": "backend/src/weather.js", "file_type": "code", "degree": 0}, {"id": "backend_src_weathercard_renderweathercard", "label": "renderWeatherCard", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 10.0, "font": {"size": 0, "color": "#ffffff"}, "title": "renderWeatherCard", "community": 54, "community_name": "renderWeatherCard", "source_file": "backend/src/weatherCard.js", "file_type": "code", "degree": 0}, {"id": "readme_weather_daily_overview", "label": "Weather Daily \u2014 Flutter App + Node.js Daily-Message Backend", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 27.1, "font": {"size": 12, "color": "#ffffff"}, "title": "Weather Daily \u2014 Flutter App + Node.js Daily-Message Backend", "community": 1, "community_name": "Daily Broadcast Flow \u2014 node-cr / Bot Setup Guide \u2014 Telegram (Bo", "source_file": "README.md", "file_type": "document", "degree": 4}, {"id": "readme_daily_broadcast_flow", "label": "Daily Broadcast Flow \u2014 node-cron 07:00 \u2192 broadcast() \u2192 fan-out to channels", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 40.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Daily Broadcast Flow \u2014 node-cron 07:00 \u2192 broadcast() \u2192 fan-out to channels", "community": 1, "community_name": "Daily Broadcast Flow \u2014 node-cr / Bot Setup Guide \u2014 Telegram (Bo", "source_file": "README.md", "file_type": "concept", "degree": 7}, {"id": "readme_open_meteo_service", "label": "Open-Meteo Weather API (free, no API key)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 27.1, "font": {"size": 12, "color": "#ffffff"}, "title": "Open-Meteo Weather API (free, no API key)", "community": 1, "community_name": "Daily Broadcast Flow \u2014 node-cr / Bot Setup Guide \u2014 Telegram (Bo", "source_file": "README.md", "file_type": "concept", "degree": 4}, {"id": "readme_telegram_channel", "label": "Telegram Bot Channel (fully working, recommended first)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 22.9, "font": {"size": 12, "color": "#ffffff"}, "title": "Telegram Bot Channel (fully working, recommended first)", "community": 1, "community_name": "Daily Broadcast Flow \u2014 node-cr / Bot Setup Guide \u2014 Telegram (Bo", "source_file": "README.md", "file_type": "concept", "degree": 3}, {"id": "readme_viber_channel", "label": "Viber Bot Channel (needs public HTTPS webhook)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 18.6, "font": {"size": 12, "color": "#ffffff"}, "title": "Viber Bot Channel (needs public HTTPS webhook)", "community": 1, "community_name": "Daily Broadcast Flow \u2014 node-cr / Bot Setup Guide \u2014 Telegram (Bo", "source_file": "README.md", "file_type": "concept", "degree": 2}, {"id": "readme_messenger_channel", "label": "Messenger Channel (policy-restricted daily sends)", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 18.6, "font": {"size": 12, "color": "#ffffff"}, "title": "Messenger Channel (policy-restricted daily sends)", "community": 4, "community_name": "Messenger Channel (policy-rest / Messenger Policy Wall \u2014 Meta 2", "source_file": "README.md", "file_type": "concept", "degree": 2}, {"id": "app_readme_flutter_boilerplate", "label": "weather_daily Flutter App README (default boilerplate)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 18.6, "font": {"size": 12, "color": "#ffffff"}, "title": "weather_daily Flutter App README (default boilerplate)", "community": 2, "community_name": "weather_daily pubspec \u2014 deps:  / weather_daily Flutter App READ", "source_file": "app/README.md", "file_type": "document", "degree": 2}, {"id": "app_analysis_options_flutter_lints", "label": "Dart Analyzer Config \u2014 flutter_lints ruleset", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 14.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Dart Analyzer Config \u2014 flutter_lints ruleset", "community": 2, "community_name": "weather_daily pubspec \u2014 deps:  / weather_daily Flutter App READ", "source_file": "app/analysis_options.yaml", "file_type": "code", "degree": 1}, {"id": "app_ios_runner_assets_xcassets_launchimage_imageset_readme_launch_assets", "label": "iOS Launch Screen Assets README", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 14.3, "font": {"size": 0, "color": "#ffffff"}, "title": "iOS Launch Screen Assets README", "community": 2, "community_name": "weather_daily pubspec \u2014 deps:  / weather_daily Flutter App READ", "source_file": "app/ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md", "file_type": "document", "degree": 1}, {"id": "app_pubspec_flutter_manifest", "label": "weather_daily pubspec \u2014 deps: http, geolocator, shared_preferences, url_launcher, flutter_launcher_icons", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 35.7, "font": {"size": 12, "color": "#ffffff"}, "title": "weather_daily pubspec \u2014 deps: http, geolocator, shared_preferences, url_launcher, flutter_launcher_icons", "community": 2, "community_name": "weather_daily pubspec \u2014 deps:  / weather_daily Flutter App READ", "source_file": "app/pubspec.yaml", "file_type": "code", "degree": 6}, {"id": "app_pubspec_launcher_icons_config", "label": "flutter_launcher_icons Adaptive Icon Config (#2980B9 background)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 14.3, "font": {"size": 0, "color": "#ffffff"}, "title": "flutter_launcher_icons Adaptive Icon Config (#2980B9 background)", "community": 2, "community_name": "weather_daily pubspec \u2014 deps:  / weather_daily Flutter App READ", "source_file": "app/pubspec.yaml", "file_type": "code", "degree": 1}, {"id": "app_web_index_flutter_web_shell", "label": "My Daily Weather \u2014 Flutter Web Bootstrap Shell", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 14.3, "font": {"size": 0, "color": "#ffffff"}, "title": "My Daily Weather \u2014 Flutter Web Bootstrap Shell", "community": 2, "community_name": "weather_daily pubspec \u2014 deps:  / weather_daily Flutter App READ", "source_file": "app/web/index.html", "file_type": "code", "degree": 1}, {"id": "backend_readme_service_overview", "label": "Weather Daily Backend README \u2014 Express Endpoints + Module Architecture", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 22.9, "font": {"size": 12, "color": "#ffffff"}, "title": "Weather Daily Backend README \u2014 Express Endpoints + Module Architecture", "community": 1, "community_name": "Daily Broadcast Flow \u2014 node-cr / Bot Setup Guide \u2014 Telegram (Bo", "source_file": "backend/README.md", "file_type": "document", "degree": 3}, {"id": "backend_readme_channel_isolation", "label": "Channel Failure Isolation \u2014 one bad token won't stop the others", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 14.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Channel Failure Isolation \u2014 one bad token won&#x27;t stop the others", "community": 1, "community_name": "Daily Broadcast Flow \u2014 node-cr / Bot Setup Guide \u2014 Telegram (Bo", "source_file": "backend/README.md", "file_type": "concept", "degree": 1}, {"id": "backend_render_blueprint", "label": "Render Blueprint (render.yaml) \u2014 Node web service, secrets sync:false", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 18.6, "font": {"size": 12, "color": "#ffffff"}, "title": "Render Blueprint (render.yaml) \u2014 Node web service, secrets sync:false", "community": 3, "community_name": "Always-On Starter Plan Require / Render Blueprint (render.yaml)", "source_file": "backend/render.yaml", "file_type": "code", "degree": 2}, {"id": "backend_render_always_on_plan", "label": "Always-On Starter Plan Requirement", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 18.6, "font": {"size": 12, "color": "#ffffff"}, "title": "Always-On Starter Plan Requirement", "community": 3, "community_name": "Always-On Starter Plan Require / Render Blueprint (render.yaml)", "source_file": "backend/render.yaml", "file_type": "rationale", "degree": 2}, {"id": "docs_bots_setup_guide", "label": "Bot Setup Guide \u2014 Telegram (BotFather), Viber (partners.viber.com), Messenger (Meta app)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 27.1, "font": {"size": 12, "color": "#ffffff"}, "title": "Bot Setup Guide \u2014 Telegram (BotFather), Viber (partners.viber.com), Messenger (Meta app)", "community": 1, "community_name": "Daily Broadcast Flow \u2014 node-cr / Bot Setup Guide \u2014 Telegram (Bo", "source_file": "docs/BOTS.md", "file_type": "document", "degree": 4}, {"id": "docs_bots_messenger_policy_wall", "label": "Messenger Policy Wall \u2014 Meta 24h window; Recurring Notifications / message tags need App Review", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 14.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Messenger Policy Wall \u2014 Meta 24h window; Recurring Notifications / message tags need App Review", "community": 4, "community_name": "Messenger Channel (policy-rest / Messenger Policy Wall \u2014 Meta 2", "source_file": "docs/BOTS.md", "file_type": "rationale", "degree": 1}, {"id": "docs_closed_test_recruitment_plan", "label": "Closed-Test Recruitment Plan \u2014 12 testers \u00d7 14 days for Play production access", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 14.3, "font": {"size": 0, "color": "#ffffff"}, "title": "Closed-Test Recruitment Plan \u2014 12 testers \u00d7 14 days for Play production access", "community": 0, "community_name": "Play Store Publishing Guide \u2014  / Hosted Privacy Policy Page (Gi", "source_file": "docs/CLOSED_TEST_RECRUITMENT.md", "file_type": "document", "degree": 1}, {"id": "docs_data_safety_form_answers", "label": "Play Data Safety Form Answers \u2014 optional ephemeral location, no sharing, HTTPS", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 18.6, "font": {"size": 12, "color": "#ffffff"}, "title": "Play Data Safety Form Answers \u2014 optional ephemeral location, no sharing, HTTPS", "community": 0, "community_name": "Play Store Publishing Guide \u2014  / Hosted Privacy Policy Page (Gi", "source_file": "docs/DATA_SAFETY.md", "file_type": "document", "degree": 2}, {"id": "docs_deploy_always_on_guide", "label": "Backend Deploy Guide \u2014 Railway/Render/Fly/VPS/Docker, sleep-tier gotcha", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 18.6, "font": {"size": 12, "color": "#ffffff"}, "title": "Backend Deploy Guide \u2014 Railway/Render/Fly/VPS/Docker, sleep-tier gotcha", "community": 3, "community_name": "Always-On Starter Plan Require / Render Blueprint (render.yaml)", "source_file": "docs/DEPLOY.md", "file_type": "document", "degree": 2}, {"id": "docs_listing_copy_final", "label": "Play Store Final Listing Copy \u2014 My Daily Weather (rain timeslots, 12-day forecast, PAGASA)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 22.9, "font": {"size": 12, "color": "#ffffff"}, "title": "Play Store Final Listing Copy \u2014 My Daily Weather (rain timeslots, 12-day forecast, PAGASA)", "community": 0, "community_name": "Play Store Publishing Guide \u2014  / Hosted Privacy Policy Page (Gi", "source_file": "docs/LISTING_COPY.md", "file_type": "document", "degree": 3}, {"id": "docs_listing_copy_pagasa_accuracy", "label": "PAGASA Integration \u2014 PH forecasts on PAGASA's 10-day model + official cyclone Wind Signals", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 14.3, "font": {"size": 0, "color": "#ffffff"}, "title": "PAGASA Integration \u2014 PH forecasts on PAGASA&#x27;s 10-day model + official cyclone Wind Signals", "community": 0, "community_name": "Play Store Publishing Guide \u2014  / Hosted Privacy Policy Page (Gi", "source_file": "docs/LISTING_COPY.md", "file_type": "concept", "degree": 1}, {"id": "docs_play_store_publishing_guide", "label": "Play Store Publishing Guide \u2014 keystore, appbundle, listing, review", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 35.7, "font": {"size": 12, "color": "#ffffff"}, "title": "Play Store Publishing Guide \u2014 keystore, appbundle, listing, review", "community": 0, "community_name": "Play Store Publishing Guide \u2014  / Hosted Privacy Policy Page (Gi", "source_file": "docs/PLAY_STORE.md", "file_type": "document", "degree": 6}, {"id": "docs_privacy_policy_text", "label": "Privacy Policy (Markdown) \u2014 app vs Telegram-bot location handling", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 22.9, "font": {"size": 12, "color": "#ffffff"}, "title": "Privacy Policy (Markdown) \u2014 app vs Telegram-bot location handling", "community": 0, "community_name": "Play Store Publishing Guide \u2014  / Hosted Privacy Policy Page (Gi", "source_file": "docs/PRIVACY_POLICY.md", "file_type": "document", "degree": 3}, {"id": "docs_store_listing_draft", "label": "Play Store Listing Draft + Graphic Asset Specs + Custom Icon Steps", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 18.6, "font": {"size": 12, "color": "#ffffff"}, "title": "Play Store Listing Draft + Graphic Asset Specs + Custom Icon Steps", "community": 0, "community_name": "Play Store Publishing Guide \u2014  / Hosted Privacy Policy Page (Gi", "source_file": "docs/STORE_LISTING.md", "file_type": "document", "degree": 2}, {"id": "docs_index_hosted_privacy_page", "label": "Hosted Privacy Policy Page (GitHub Pages, peremiller.github.io/weather-daily)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 22.9, "font": {"size": 12, "color": "#ffffff"}, "title": "Hosted Privacy Policy Page (GitHub Pages, peremiller.github.io/weather-daily)", "community": 0, "community_name": "Play Store Publishing Guide \u2014  / Hosted Privacy Policy Page (Gi", "source_file": "docs/index.html", "file_type": "code", "degree": 3}, {"id": "store_assets_readme_play_graphics", "label": "Play Store Assets \u2014 icon 512, feature graphic, screenshots via make_store_assets.py", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 18.6, "font": {"size": 12, "color": "#ffffff"}, "title": "Play Store Assets \u2014 icon 512, feature graphic, screenshots via make_store_assets.py", "community": 0, "community_name": "Play Store Publishing Guide \u2014  / Hosted Privacy Policy Page (Gi", "source_file": "store-assets/README.md", "file_type": "document", "degree": 2}];
+const RAW_EDGES = [{"from": "readme_weather_daily_overview", "to": "docs_bots_setup_guide", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_weather_daily_overview", "to": "docs_play_store_publishing_guide", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_weather_daily_overview", "to": "readme_daily_broadcast_flow", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_weather_daily_overview", "to": "readme_open_meteo_service", "label": "cites", "title": "cites [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_daily_broadcast_flow", "to": "backend_readme_channel_isolation", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_daily_broadcast_flow", "to": "backend_readme_service_overview", "label": "implements", "title": "implements [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_daily_broadcast_flow", "to": "readme_messenger_channel", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_daily_broadcast_flow", "to": "readme_open_meteo_service", "label": "calls", "title": "calls [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_daily_broadcast_flow", "to": "readme_telegram_channel", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_daily_broadcast_flow", "to": "readme_viber_channel", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_open_meteo_service", "to": "app_pubspec_flutter_manifest", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_open_meteo_service", "to": "backend_readme_service_overview", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_telegram_channel", "to": "docs_bots_setup_guide", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_telegram_channel", "to": "docs_privacy_policy_text", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_viber_channel", "to": "docs_bots_setup_guide", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "readme_messenger_channel", "to": "docs_bots_messenger_policy_wall", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "app_readme_flutter_boilerplate", "to": "app_ios_runner_assets_xcassets_launchimage_imageset_readme_launch_assets", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "app_readme_flutter_boilerplate", "to": "app_pubspec_flutter_manifest", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "app_analysis_options_flutter_lints", "to": "app_pubspec_flutter_manifest", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "app_pubspec_flutter_manifest", "to": "app_pubspec_launcher_icons_config", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "app_pubspec_flutter_manifest", "to": "app_web_index_flutter_web_shell", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "app_pubspec_flutter_manifest", "to": "docs_play_store_publishing_guide", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "backend_readme_service_overview", "to": "docs_bots_setup_guide", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "backend_render_blueprint", "to": "backend_render_always_on_plan", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "backend_render_blueprint", "to": "docs_deploy_always_on_guide", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "backend_render_always_on_plan", "to": "docs_deploy_always_on_guide", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "docs_closed_test_recruitment_plan", "to": "docs_play_store_publishing_guide", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "docs_data_safety_form_answers", "to": "docs_index_hosted_privacy_page", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "docs_data_safety_form_answers", "to": "docs_listing_copy_final", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "docs_listing_copy_final", "to": "docs_listing_copy_pagasa_accuracy", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "docs_listing_copy_final", "to": "docs_store_listing_draft", "label": "semantically_similar_to", "title": "semantically_similar_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "docs_play_store_publishing_guide", "to": "docs_privacy_policy_text", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "docs_play_store_publishing_guide", "to": "docs_store_listing_draft", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "docs_play_store_publishing_guide", "to": "store_assets_readme_play_graphics", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "docs_privacy_policy_text", "to": "docs_index_hosted_privacy_page", "label": "implements", "title": "implements [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "docs_index_hosted_privacy_page", "to": "store_assets_readme_play_graphics", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}];
+const LEGEND = [{"cid": 0, "color": "#4E79A7", "label": "Play Store Publishing Guide \u2014  / Hosted Privacy Policy Page (Gi", "count": 9}, {"cid": 1, "color": "#F28E2B", "label": "Daily Broadcast Flow \u2014 node-cr / Bot Setup Guide \u2014 Telegram (Bo", "count": 8}, {"cid": 2, "color": "#E15759", "label": "weather_daily pubspec \u2014 deps:  / weather_daily Flutter App READ", "count": 6}, {"cid": 3, "color": "#76B7B2", "label": "Always-On Starter Plan Require / Render Blueprint (render.yaml)", "count": 3}, {"cid": 4, "color": "#59A14F", "label": "Messenger Channel (policy-rest / Messenger Policy Wall \u2014 Meta 2", "count": 2}, {"cid": 5, "color": "#EDC948", "label": "sendDaily", "count": 1}, {"cid": 6, "color": "#B07AA1", "label": "sendText", "count": 1}, {"cid": 7, "color": "#FF9DA7", "label": "deleteWebhook", "count": 1}, {"cid": 8, "color": "#9C755F", "label": "registerCommands", "count": 1}, {"cid": 9, "color": "#BAB0AC", "label": "safeCard", "count": 1}, {"cid": 10, "color": "#4E79A7", "label": "safeDailyCard", "count": 1}, {"cid": 11, "color": "#F28E2B", "label": "safeTyphoonCard", "count": 1}, {"cid": 12, "color": "#E15759", "label": "safeTyphoonCards", "count": 1}, {"cid": 13, "color": "#76B7B2", "label": "sendDaily", "count": 1}, {"cid": 14, "color": "#59A14F", "label": "sendPhoto", "count": 1}, {"cid": 15, "color": "#EDC948", "label": "sendText", "count": 1}, {"cid": 16, "color": "#B07AA1", "label": "startPolling", "count": 1}, {"cid": 17, "color": "#FF9DA7", "label": "sendDaily", "count": 1}, {"cid": 18, "color": "#9C755F", "label": "sendText", "count": 1}, {"cid": 19, "color": "#BAB0AC", "label": "setWebhook", "count": 1}, {"cid": 20, "color": "#4E79A7", "label": "broadcastDaily", "count": 1}, {"cid": 21, "color": "#F28E2B", "label": "enabledChannels", "count": 1}, {"cid": 22, "color": "#E15759", "label": "buildPostcardHTML", "count": 1}, {"cid": 23, "color": "#76B7B2", "label": "renderPostcardPNG", "count": 1}, {"cid": 24, "color": "#59A14F", "label": "handleTelegramMessage", "count": 1}, {"cid": 25, "color": "#EDC948", "label": "sendOwnerReport", "count": 1}, {"cid": 26, "color": "#B07AA1", "label": "getTropicalCyclone", "count": 1}, {"cid": 27, "color": "#FF9DA7", "label": "getPagasaTenDay", "count": 1}, {"cid": 28, "color": "#9C755F", "label": "pagasaTenDayPanel", "count": 1}, {"cid": 29, "color": "#BAB0AC", "label": "startScheduler", "count": 1}, {"cid": 30, "color": "#4E79A7", "label": "addSubscriber", "count": 1}, {"cid": 31, "color": "#F28E2B", "label": "getAllUserLocations", "count": 1}, {"cid": 32, "color": "#E15759", "label": "getSubscribers", "count": 1}, {"cid": 33, "color": "#76B7B2", "label": "getUserLocation", "count": 1}, {"cid": 34, "color": "#59A14F", "label": "removeSubscriber", "count": 1}, {"cid": 35, "color": "#EDC948", "label": "setUserLocation", "count": 1}, {"cid": 36, "color": "#B07AA1", "label": "renderTyphoonCard", "count": 1}, {"cid": 37, "color": "#FF9DA7", "label": "currentState", "count": 1}, {"cid": 38, "color": "#9C755F", "label": "estimateParEntry", "count": 1}, {"cid": 39, "color": "#BAB0AC", "label": "getParTiming", "count": 1}, {"cid": 40, "color": "#4E79A7", "label": "jmaActiveStorms", "count": 1}, {"cid": 41, "color": "#F28E2B", "label": "positionAt", "count": 1}, {"cid": 42, "color": "#E15759", "label": "getTyphoonWatch", "count": 1}, {"cid": 43, "color": "#76B7B2", "label": "typhoonWatchLine", "count": 1}, {"cid": 44, "color": "#59A14F", "label": "typhoonWatchLines", "count": 1}, {"cid": 45, "color": "#EDC948", "label": "dailyEmoji", "count": 1}, {"cid": 46, "color": "#B07AA1", "label": "describeCode", "count": 1}, {"cid": 47, "color": "#FF9DA7", "label": "formatMessage", "count": 1}, {"cid": 48, "color": "#9C755F", "label": "geocode", "count": 1}, {"cid": 49, "color": "#BAB0AC", "label": "getDailyWeather", "count": 1}, {"cid": 50, "color": "#4E79A7", "label": "getForecast", "count": 1}, {"cid": 51, "color": "#F28E2B", "label": "isPhilippines", "count": 1}, {"cid": 52, "color": "#E15759", "label": "resolveLocation", "count": 1}, {"cid": 53, "color": "#76B7B2", "label": "reverseGeocode", "count": 1}, {"cid": 54, "color": "#59A14F", "label": "renderWeatherCard", "count": 1}];
+
+// HTML-escape helper — prevents XSS when injecting graph data into innerHTML
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Build vis datasets
+const nodesDS = new vis.DataSet(RAW_NODES.map(n => ({
+  id: n.id, label: n.label, color: n.color, size: n.size,
+  font: n.font, title: n.title,
+  _community: n.community, _community_name: n.community_name,
+  _source_file: n.source_file, _file_type: n.file_type, _degree: n.degree,
+})));
+
+const edgesDS = new vis.DataSet(RAW_EDGES.map((e, i) => ({
+  id: i, from: e.from, to: e.to,
+  label: '',
+  title: e.title,
+  dashes: e.dashes,
+  width: e.width,
+  color: e.color,
+  arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+})));
+
+const container = document.getElementById('graph');
+const network = new vis.Network(container, { nodes: nodesDS, edges: edgesDS }, {
+  physics: {
+    enabled: true,
+    solver: 'forceAtlas2Based',
+    forceAtlas2Based: {
+      gravitationalConstant: -60,
+      centralGravity: 0.005,
+      springLength: 120,
+      springConstant: 0.08,
+      damping: 0.4,
+      avoidOverlap: 0.8,
+    },
+    stabilization: { iterations: 200, fit: true },
+  },
+  interaction: {
+    hover: true,
+    tooltipDelay: 100,
+    hideEdgesOnDrag: true,
+    navigationButtons: false,
+    keyboard: false,
+  },
+  nodes: { shape: 'dot', borderWidth: 1.5 },
+  edges: { smooth: { type: 'continuous', roundness: 0.2 }, selectionWidth: 3 },
+});
+
+network.once('stabilizationIterationsDone', () => {
+  network.setOptions({ physics: { enabled: false } });
+});
+
+function showInfo(nodeId) {
+  const n = nodesDS.get(nodeId);
+  if (!n) return;
+  const neighborIds = network.getConnectedNodes(nodeId);
+  const neighborItems = neighborIds.map(nid => {
+    const nb = nodesDS.get(nid);
+    const color = nb ? nb.color.background : '#555';
+    return `<span class="neighbor-link" style="border-left-color:${esc(color)}" data-nid="${esc(nid)}">${esc(nb ? nb.label : nid)}</span>`;
+  }).join('');
+  document.getElementById('info-content').innerHTML = `
+    <div class="field"><b>${esc(n.label)}</b></div>
+    <div class="field">Type: ${esc(n._file_type || 'unknown')}</div>
+    <div class="field">Community: ${esc(n._community_name)}</div>
+    <div class="field">Source: ${esc(n._source_file || '-')}</div>
+    <div class="field">Degree: ${n._degree}</div>
+    ${neighborIds.length ? `<div class="field" style="margin-top:8px;color:#aaa;font-size:11px">Neighbors (${neighborIds.length})</div><div id="neighbors-list">${neighborItems}</div>` : ''}
+  `;
+}
+
+function focusNode(nodeId) {
+  network.focus(nodeId, { scale: 1.4, animation: true });
+  network.selectNodes([nodeId]);
+  showInfo(nodeId);
+}
+
+// Neighbor links use a data attribute + one delegated listener rather than an
+// inline onclick. A node id/label sourced from a document or a scraped URL
+// (graphify add) can contain a double-quote; dropping the stringified id
+// unescaped into a quoted onclick both broke every link and allowed a hostile
+// source to inject an event handler into the local report (stored XSS, #1838).
+// esc() on data-nid keeps the value inside the attribute; the listener reads it
+// back verbatim. Bound to document so it survives the innerHTML rebuild that
+// recreates #neighbors-list on each showInfo().
+document.addEventListener('click', e => {
+  const el = e.target.closest('.neighbor-link');
+  if (el && el.dataset.nid !== undefined) focusNode(el.dataset.nid);
+});
+
+// Track hovered node — hover detection is more reliable than click params
+let hoveredNodeId = null;
+network.on('hoverNode', params => {
+  hoveredNodeId = params.node;
+  container.style.cursor = 'pointer';
+});
+network.on('blurNode', () => {
+  hoveredNodeId = null;
+  container.style.cursor = 'default';
+});
+container.addEventListener('click', () => {
+  if (hoveredNodeId !== null) {
+    showInfo(hoveredNodeId);
+    network.selectNodes([hoveredNodeId]);
+  }
+});
+network.on('click', params => {
+  if (params.nodes.length > 0) {
+    showInfo(params.nodes[0]);
+  } else if (hoveredNodeId === null) {
+    document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
+  }
+});
+
+const searchInput = document.getElementById('search');
+const searchResults = document.getElementById('search-results');
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.toLowerCase().trim();
+  searchResults.innerHTML = '';
+  if (!q) { searchResults.style.display = 'none'; return; }
+  const matches = RAW_NODES.filter(n => n.label.toLowerCase().includes(q)).slice(0, 20);
+  if (!matches.length) { searchResults.style.display = 'none'; return; }
+  searchResults.style.display = 'block';
+  matches.forEach(n => {
+    const el = document.createElement('div');
+    el.className = 'search-item';
+    el.textContent = n.label;
+    el.style.borderLeft = `3px solid ${n.color.background}`;
+    el.style.paddingLeft = '8px';
+    el.onclick = () => {
+      network.focus(n.id, { scale: 1.5, animation: true });
+      network.selectNodes([n.id]);
+      showInfo(n.id);
+      searchResults.style.display = 'none';
+      searchInput.value = '';
+    };
+    searchResults.appendChild(el);
+  });
+});
+document.addEventListener('click', e => {
+  if (!searchResults.contains(e.target) && e.target !== searchInput)
+    searchResults.style.display = 'none';
+});
+
+const hiddenCommunities = new Set();
+
+const selectAllCb = document.getElementById('select-all-cb');
+
+function updateSelectAllState() {
+  const total = LEGEND.length;
+  const hidden = hiddenCommunities.size;
+  selectAllCb.checked = hidden === 0;
+  selectAllCb.indeterminate = hidden > 0 && hidden < total;
+}
+
+function toggleAllCommunities(hide) {
+  document.querySelectorAll('.legend-item').forEach(item => {
+    hide ? item.classList.add('dimmed') : item.classList.remove('dimmed');
+  });
+  document.querySelectorAll('.legend-cb').forEach(cb => {
+    cb.checked = !hide;
+  });
+  LEGEND.forEach(c => {
+    if (hide) hiddenCommunities.add(c.cid); else hiddenCommunities.delete(c.cid);
+  });
+  const updates = RAW_NODES.map(n => ({ id: n.id, hidden: hide }));
+  nodesDS.update(updates);
+  updateSelectAllState();
+}
+
+const legendEl = document.getElementById('legend');
+LEGEND.forEach(c => {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.className = 'legend-cb';
+  cb.checked = true;
+  cb.addEventListener('change', (e) => {
+    e.stopPropagation();
+    if (cb.checked) {
+      hiddenCommunities.delete(c.cid);
+      item.classList.remove('dimmed');
+    } else {
+      hiddenCommunities.add(c.cid);
+      item.classList.add('dimmed');
+    }
+    const updates = RAW_NODES
+      .filter(n => n.community === c.cid)
+      .map(n => ({ id: n.id, hidden: !cb.checked }));
+    nodesDS.update(updates);
+    updateSelectAllState();
+  });
+  item.innerHTML = `<div class="legend-dot" style="background:${c.color}"></div>
+    <span class="legend-label">${c.label}</span>
+    <span class="legend-count">${c.count}</span>`;
+  item.prepend(cb);
+  item.onclick = (e) => {
+    if (e.target === cb) return;
+    cb.checked = !cb.checked;
+    cb.dispatchEvent(new Event('change'));
+  };
+  legendEl.appendChild(item);
+});
+</script>
+<script>
+// Render hyperedges as shaded regions
+const hyperedges = [{"nodes": ["readme_daily_broadcast_flow", "readme_open_meteo_service", "readme_telegram_channel", "readme_viber_channel", "readme_messenger_channel"], "relation": "daily_weather_broadcast_pipeline", "description": "node-cron fires at 07:00, broadcast() fetches Open-Meteo once, then fans out independently to Telegram, Viber, and Messenger channels", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "README.md", "source_location": null, "weight": 1.0}];
+// afterDrawing passes ctx already transformed to network coordinate space.
+// Draw node positions raw — no manual pan/zoom/DPR math needed.
+network.on('afterDrawing', function(ctx) {
+    hyperedges.forEach(h => {
+        const positions = h.nodes
+            .map(nid => network.getPositions([nid])[nid])
+            .filter(p => p !== undefined);
+        if (positions.length < 2) return;
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = '#6366f1';
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        // Centroid and expanded hull in network coordinates
+        const cx = positions.reduce((s, p) => s + p.x, 0) / positions.length;
+        const cy = positions.reduce((s, p) => s + p.y, 0) / positions.length;
+        const expanded = positions.map(p => ({
+            x: cx + (p.x - cx) * 1.15,
+            y: cy + (p.y - cy) * 1.15
+        }));
+        ctx.moveTo(expanded[0].x, expanded[0].y);
+        expanded.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 0.4;
+        ctx.stroke();
+        // Label
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = '#4f46e5';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(h.label, cx, cy - 5);
+        ctx.restore();
+    });
+});
+</script>
+</body>
+</html>

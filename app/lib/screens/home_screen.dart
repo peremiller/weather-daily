@@ -161,6 +161,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _current(w),
         const SizedBox(height: 20),
         _rainBanner(w),
+        _hourlyStrip(w),
+        _airQualityCard(w),
         _detailsGrid(w),
         _tomorrowSun(w),
         _driestDays(w),
@@ -207,6 +209,127 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const Icon(Icons.open_in_new, color: Colors.white70, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Horizontal next-24h strip: hour · icon · temp · rain%. A staple of every
+  // top weather app that this build was missing.
+  Widget _hourlyStrip(Weather w) {
+    if (w.hourly.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: SizedBox(
+          height: 118,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: w.hourly.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 6),
+            itemBuilder: (_, i) {
+              final h = w.hourly[i];
+              return SizedBox(
+                width: 52,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      i == 0 ? 'Now' : _hourLabel(h.time),
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12),
+                    ),
+                    const SizedBox(height: 8),
+                    Icon(h.displayIcon, color: Colors.white, size: 24),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${h.temp.round()}°',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    Opacity(
+                      opacity: h.precipProbability >= 10 ? 1 : 0,
+                      child: Text(
+                        '${h.precipProbability}%',
+                        style: const TextStyle(
+                            color: Colors.lightBlueAccent, fontSize: 11),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _hourLabel(DateTime t) {
+    final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
+    return '$h${t.hour < 12 ? 'AM' : 'PM'}';
+  }
+
+  // Colored air-quality strip (US AQI), the way Apple/Google surface it.
+  Widget _airQualityCard(Weather w) {
+    final air = w.air;
+    if (air == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: air.color,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '${air.usAqi}',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Air quality (US AQI)',
+                      style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  const SizedBox(height: 2),
+                  Text(
+                    air.pm25 != null
+                        ? '${air.label}  ·  PM2.5 ${air.pm25!.round()}'
+                        : air.label,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -314,13 +437,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _detailsGrid(Weather w) {
-    final items = [
+    final windDir = w.windDirection != null
+        ? ' ${Weather.compass(w.windDirection!)}'
+        : '';
+    final uv = w.uvIndexNow ?? w.uvIndexMax;
+    final items = <_Detail>[
       _Detail(Icons.water_drop_outlined, 'Humidity', '${w.humidity}%'),
       _Detail(Icons.umbrella_outlined, 'Rain chance', '${w.precipProbability}%'),
-      _Detail(Icons.air, 'Wind', '${w.windSpeed.round()} km/h'),
+      _Detail(Icons.air, 'Wind', '${w.windSpeed.round()} km/h$windDir'),
+      if (uv != null)
+        _Detail(Icons.wb_sunny_outlined, 'UV index',
+            '${uv.round()} · ${Weather.uvLabel(uv)}'),
+      if (w.pressure != null)
+        _Detail(Icons.speed, 'Pressure', '${w.pressure!.round()} hPa'),
+      if (w.visibilityKm != null)
+        _Detail(Icons.visibility_outlined, 'Visibility',
+            '${w.visibilityKm!.round()} km'),
+      if (w.windGusts != null)
+        _Detail(Icons.air, 'Gusts', '${w.windGusts!.round()} km/h'),
+      if (w.dewPoint != null)
+        _Detail(Icons.opacity, 'Dew point',
+            '${w.dewPoint!.round()}${w.unitSymbol}'),
       _Detail(Icons.wb_twilight, 'Sunrise', _time(w.sunrise)),
       _Detail(Icons.nightlight_outlined, 'Sunset', _time(w.sunset)),
-      _Detail(Icons.thermostat, 'Feels like', '${w.feelsLike.round()}${w.unitSymbol}'),
     ];
     return GridView.count(
       crossAxisCount: 3,
