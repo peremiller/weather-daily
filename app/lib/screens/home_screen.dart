@@ -30,6 +30,10 @@ class _HomeScreenState extends State<HomeScreen> {
   double _lon = 120.9842;
   String _placeName = 'Manila';
 
+  // All places the user has saved (the "cities list" of the best apps). Each is
+  // {lat, lon, name}; the currently-viewed one is mirrored in _lat/_lon/_name.
+  List<Map<String, dynamic>> _saved = [];
+
   @override
   void initState() {
     super.initState();
@@ -38,9 +42,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _restoreAndLoad() async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('place');
-    if (saved != null) {
-      final m = jsonDecode(saved) as Map<String, dynamic>;
+    // New multi-location store; migrate the old single 'place' if present.
+    final list = prefs.getString('places_v2');
+    if (list != null) {
+      _saved = (jsonDecode(list) as List)
+          .map((e) => (e as Map).cast<String, dynamic>())
+          .toList();
+    } else {
+      final legacy = prefs.getString('place');
+      if (legacy != null) {
+        _saved = [(jsonDecode(legacy) as Map).cast<String, dynamic>()];
+      }
+    }
+    if (_saved.isNotEmpty) {
+      final m = _saved.first;
       _lat = (m['lat'] as num).toDouble();
       _lon = (m['lon'] as num).toDouble();
       _placeName = m['name'] as String;
@@ -48,12 +63,38 @@ class _HomeScreenState extends State<HomeScreen> {
     await _load();
   }
 
-  Future<void> _savePlace() async {
+  Future<void> _persistSaved() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      'place',
-      jsonEncode({'lat': _lat, 'lon': _lon, 'name': _placeName}),
-    );
+    await prefs.setString('places_v2', jsonEncode(_saved));
+    // Keep the legacy key in sync so the Telegram-linked flow still reads it.
+    if (_saved.isNotEmpty) {
+      await prefs.setString('place', jsonEncode(_saved.first));
+    }
+  }
+
+  bool _sameSpot(Map<String, dynamic> a, double lat, double lon) =>
+      ((a['lat'] as num) - lat).abs() < 0.02 &&
+      ((a['lon'] as num) - lon).abs() < 0.02;
+
+  /// Select this place, move it to the front of the saved list (so it's the
+  /// default next launch), persist, and reload.
+  Future<void> _selectPlace(double lat, double lon, String name,
+      {bool save = true}) async {
+    _lat = lat;
+    _lon = lon;
+    _placeName = name;
+    if (save) {
+      _saved.removeWhere((e) => _sameSpot(e, lat, lon));
+      _saved.insert(0, {'lat': lat, 'lon': lon, 'name': name});
+      await _persistSaved();
+    }
+    await _load();
+  }
+
+  Future<void> _removeSaved(int index) async {
+    _saved.removeAt(index);
+    await _persistSaved();
+    setState(() {});
   }
 
   Future<void> _load() async {
@@ -80,11 +121,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final pos = await LocationService.current();
       final name = await _service.nameForCoords(pos.latitude, pos.longitude);
-      _lat = pos.latitude;
-      _lon = pos.longitude;
-      _placeName = name;
-      await _savePlace();
-      await _load();
+      await _selectPlace(pos.latitude, pos.longitude, name);
     } catch (e) {
       setState(() {
         _loading = false;
@@ -108,12 +145,31 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (_) => _SearchSheet(service: _service),
     );
     if (place != null) {
-      _lat = place.latitude;
-      _lon = place.longitude;
-      _placeName = place.displayName;
-      await _savePlace();
-      await _load();
+      await _selectPlace(place.latitude, place.longitude, place.displayName);
     }
+  }
+
+  Future<void> _openSavedLocations() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _SavedLocationsSheet(
+        items: _saved,
+        currentLat: _lat,
+        currentLon: _lon,
+        onSelect: (e) => _selectPlace(
+            (e['lat'] as num).toDouble(),
+            (e['lon'] as num).toDouble(),
+            e['name'] as String),
+        onRemove: _removeSaved,
+        onAddCity: _openSearch,
+        onUseLocation: _useMyLocation,
+      ),
+    );
   }
 
   @override
@@ -215,6 +271,27 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Shared "frosted glass" surface: a soft top-down light gradient plus a
+  // hairline highlight border, so cards read as glass rather than flat 15%
+  // overlays. (Panel note: real backdrop blur is pointless over a flat
+  // gradient — nothing behind to blur — so we fake the light edge instead.)
+  BoxDecoration _glass([double radius = 16]) => BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white.withValues(alpha: 0.22),
+            Colors.white.withValues(alpha: 0.08),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(
+            color: Colors.white.withValues(alpha: 0.25), width: 0.6),
+      );
+
+  // Tabular figures keep temps/times from jittering as digits change.
+  static const _tnum = [FontFeature.tabularFigures()];
+
   // Horizontal next-24h strip: hour · icon · temp · rain%. A staple of every
   // top weather app that this build was missing.
   Widget _hourlyStrip(Weather w) {
@@ -222,49 +299,63 @@ class _HomeScreenState extends State<HomeScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(18),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: _glass(18),
+        padding: const EdgeInsets.symmetric(vertical: 14),
         child: SizedBox(
-          height: 118,
+          height: 126,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
             itemCount: w.hourly.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 6),
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (_, i) {
               final h = w.hourly[i];
+              final wet = h.precipProbability >= 10;
               return SizedBox(
-                width: 52,
+                width: 46,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
                       i == 0 ? 'Now' : _hourLabel(h.time),
                       style: const TextStyle(
-                          color: Colors.white70, fontSize: 12),
+                          color: Colors.white70,
+                          fontSize: 12,
+                          fontFeatures: _tnum),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Icon(h.displayIcon, color: Colors.white, size: 24),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Text(
                       '${h.temp.round()}°',
                       style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          fontFeatures: _tnum),
                     ),
-                    const SizedBox(height: 4),
-                    Opacity(
-                      opacity: h.precipProbability >= 10 ? 1 : 0,
-                      child: Text(
-                        '${h.precipProbability}%',
-                        style: const TextStyle(
-                            color: Colors.lightBlueAccent, fontSize: 11),
-                      ),
-                    ),
+                    const SizedBox(height: 6),
+                    // Precip pill only when it actually might rain (no reserved
+                    // blank space, and readable on any gradient).
+                    if (wet)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${h.precipProbability}%',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              fontFeatures: _tnum),
+                        ),
+                      )
+                    else
+                      const SizedBox(height: 18),
                   ],
                 ),
               );
@@ -280,56 +371,103 @@ class _HomeScreenState extends State<HomeScreen> {
     return '$h${t.hour < 12 ? 'AM' : 'PM'}';
   }
 
-  // Colored air-quality strip (US AQI), the way Apple/Google surface it.
+  // Air quality (US AQI) as a spectrum gauge: the value sits on a green→purple
+  // severity bar, so it reads at a glance without a saturated block fighting
+  // the background gradient.
   Widget _airQualityCard(Weather w) {
     final air = w.air;
     if (air == null) return const SizedBox.shrink();
+    // Map 0..300+ onto the bar; clamp so extreme values pin to the end.
+    final t = (air.usAqi / 300).clamp(0.0, 1.0);
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Row(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        decoration: _glass(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: air.color,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                '${air.usAqi}',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Air quality (US AQI)',
-                      style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  const SizedBox(height: 2),
-                  Text(
-                    air.pm25 != null
-                        ? '${air.label}  ·  PM2.5 ${air.pm25!.round()}'
-                        : air.label,
+            Row(
+              children: [
+                const Text('AIR QUALITY',
+                    style: TextStyle(
+                        color: Colors.white60,
+                        fontSize: 10,
+                        letterSpacing: 0.8,
+                        fontWeight: FontWeight.w600)),
+                const Spacer(),
+                Text('${air.usAqi}',
                     style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: _tnum)),
+                const SizedBox(width: 6),
+                Text('US AQI',
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.6),
+                        fontSize: 11)),
+              ],
             ),
+            const SizedBox(height: 4),
+            Text(
+              air.pm25 != null
+                  ? '${air.label}  ·  PM2.5 ${air.pm25!.round()} µg/m³'
+                  : air.label,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            // Spectrum bar + position indicator.
+            LayoutBuilder(builder: (context, c) {
+              const barH = 8.0;
+              const knob = 5.0;
+              final x = (c.maxWidth - knob) * t;
+              return SizedBox(
+                height: 16,
+                child: Stack(
+                  children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        height: barH,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(4),
+                          gradient: const LinearGradient(colors: [
+                            Color(0xFF2ECC71),
+                            Color(0xFFF1C40F),
+                            Color(0xFFE67E22),
+                            Color(0xFFE74C3C),
+                            Color(0xFF9B59B6),
+                            Color(0xFF7D3C98),
+                          ]),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: x,
+                      top: 0,
+                      child: Container(
+                        width: knob,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(3),
+                          boxShadow: [
+                            BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.35),
+                                blurRadius: 3)
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
           ],
         ),
       ),
@@ -389,6 +527,15 @@ class _HomeScreenState extends State<HomeScreen> {
           onPressed: _useMyLocation,
         ),
         IconButton(
+          icon: Badge(
+            isLabelVisible: _saved.length > 1,
+            label: Text('${_saved.length}'),
+            child: const Icon(Icons.bookmarks_outlined, color: Colors.white),
+          ),
+          tooltip: 'Saved locations',
+          onPressed: _openSavedLocations,
+        ),
+        IconButton(
           icon: const Icon(Icons.search, color: Colors.white),
           tooltip: 'Search city',
           onPressed: _openSearch,
@@ -437,19 +584,24 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _detailsGrid(Weather w) {
-    final windDir = w.windDirection != null
-        ? ' ${Weather.compass(w.windDirection!)}'
-        : '';
     final uv = w.uvIndexNow ?? w.uvIndexMax;
     final items = <_Detail>[
       _Detail(Icons.water_drop_outlined, 'Humidity', '${w.humidity}%'),
-      _Detail(Icons.umbrella_outlined, 'Rain chance', '${w.precipProbability}%'),
-      _Detail(Icons.air, 'Wind', '${w.windSpeed.round()} km/h$windDir'),
+      _Detail(Icons.umbrella_outlined, 'Rain', '${w.precipProbability}%'),
+      _Detail(Icons.air, 'Wind', '${w.windSpeed.round()} km/h',
+          subtext: w.windDirection != null
+              ? 'from ${Weather.compass(w.windDirection!)}'
+              : null,
+          // Arrow points where the wind is heading (bearing + 180°).
+          arrowDeg: w.windDirection != null
+              ? (w.windDirection! + 180).toDouble()
+              : null),
       if (uv != null)
-        _Detail(Icons.wb_sunny_outlined, 'UV index',
-            '${uv.round()} · ${Weather.uvLabel(uv)}'),
+        _Detail(Icons.wb_sunny_outlined, 'UV index', '${uv.round()}',
+            subtext: Weather.uvLabel(uv)),
       if (w.pressure != null)
-        _Detail(Icons.speed, 'Pressure', '${w.pressure!.round()} hPa'),
+        _Detail(Icons.speed, 'Pressure', '${w.pressure!.round()}',
+            subtext: 'hPa'),
       if (w.visibilityKm != null)
         _Detail(Icons.visibility_outlined, 'Visibility',
             '${w.visibilityKm!.round()} km'),
@@ -467,31 +619,61 @@ class _HomeScreenState extends State<HomeScreen> {
       physics: const NeverScrollableScrollPhysics(),
       mainAxisSpacing: 12,
       crossAxisSpacing: 12,
-      childAspectRatio: 0.95,
+      childAspectRatio: 0.88,
       children: items.map((d) => _detailCard(d)).toList(),
     );
   }
 
   Widget _detailCard(_Detail d) {
+    final icon = d.arrowDeg != null
+        ? Transform.rotate(
+            angle: d.arrowDeg! * 0.0174533, // deg -> rad
+            child: const Icon(Icons.navigation, color: Colors.white60, size: 15),
+          )
+        : Icon(d.icon, color: Colors.white60, size: 15);
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(16),
-      ),
+      decoration: _glass(16),
       padding: const EdgeInsets.all(12),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(d.icon, color: Colors.white, size: 26),
-          const SizedBox(height: 8),
-          Text(d.value,
+          Row(
+            children: [
+              icon,
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  d.label.toUpperCase(),
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: Colors.white60,
+                      fontSize: 10,
+                      letterSpacing: 0.6,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              d.value,
               style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600)),
-          const SizedBox(height: 2),
-          Text(d.label,
-              style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                  fontSize: 21,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: _tnum),
+            ),
+          ),
+          if (d.subtext != null)
+            Text(
+              d.subtext!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70, fontSize: 11),
+            ),
         ],
       ),
     );
@@ -719,7 +901,9 @@ class _Detail {
   final IconData icon;
   final String label;
   final String value;
-  _Detail(this.icon, this.label, this.value);
+  final String? subtext;
+  final double? arrowDeg; // if set, icon becomes an arrow rotated to this bearing
+  _Detail(this.icon, this.label, this.value, {this.subtext, this.arrowDeg});
 }
 
 class _ErrorView extends StatelessWidget {
@@ -752,6 +936,139 @@ class _ErrorView extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Bottom sheet listing the user's saved cities: tap to switch, delete to
+/// remove, plus quick actions to add a city or jump to the current location.
+class _SavedLocationsSheet extends StatefulWidget {
+  final List<Map<String, dynamic>> items;
+  final double currentLat;
+  final double currentLon;
+  final void Function(Map<String, dynamic>) onSelect;
+  final Future<void> Function(int) onRemove;
+  final Future<void> Function() onAddCity;
+  final Future<void> Function() onUseLocation;
+
+  const _SavedLocationsSheet({
+    required this.items,
+    required this.currentLat,
+    required this.currentLon,
+    required this.onSelect,
+    required this.onRemove,
+    required this.onAddCity,
+    required this.onUseLocation,
+  });
+
+  @override
+  State<_SavedLocationsSheet> createState() => _SavedLocationsSheetState();
+}
+
+class _SavedLocationsSheetState extends State<_SavedLocationsSheet> {
+  late final List<Map<String, dynamic>> _items = List.of(widget.items);
+
+  bool _isCurrent(Map<String, dynamic> e) =>
+      ((e['lat'] as num) - widget.currentLat).abs() < 0.02 &&
+      ((e['lon'] as num) - widget.currentLon).abs() < 0.02;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 12,
+        right: 12,
+        top: 12,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.black26,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(8, 12, 8, 8),
+            child: Text('Saved locations',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          ),
+          if (_items.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('No saved places yet — add a city below.',
+                  style: TextStyle(color: Colors.black54)),
+            )
+          else
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.45),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _items.length,
+                itemBuilder: (_, i) {
+                  final e = _items[i];
+                  final current = _isCurrent(e);
+                  return ListTile(
+                    leading: Icon(
+                      current ? Icons.my_location : Icons.location_city,
+                      color: current
+                          ? Theme.of(context).colorScheme.primary
+                          : Colors.black54,
+                    ),
+                    title: Text(e['name'] as String),
+                    subtitle: current ? const Text('Showing now') : null,
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'Remove',
+                      onPressed: () async {
+                        await widget.onRemove(i);
+                        setState(() => _items.removeAt(i));
+                      },
+                    ),
+                    onTap: () {
+                      Navigator.pop(context);
+                      widget.onSelect(e);
+                    },
+                  );
+                },
+              ),
+            ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.my_location),
+                  label: const Text('My location'),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    widget.onUseLocation();
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add city'),
+                  onPressed: () {
+                    Navigator.pop(context);
+                    widget.onAddCity();
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
