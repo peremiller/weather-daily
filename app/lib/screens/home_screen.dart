@@ -8,14 +8,16 @@ import '../services/location_service.dart';
 import 'privacy_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  /// Inject a service in tests; production uses the default Open-Meteo one.
+  final WeatherService? service;
+  const HomeScreen({super.key, this.service});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _service = WeatherService();
+  late final WeatherService _service = widget.service ?? WeatherService();
 
   Weather? _weather;
   String? _error;
@@ -302,7 +304,9 @@ class _HomeScreenState extends State<HomeScreen> {
         decoration: _glass(18),
         padding: const EdgeInsets.symmetric(vertical: 14),
         child: SizedBox(
-          height: 126,
+          // Roomy enough that larger text metrics / accessibility scaling
+          // don't overflow the column (caught by the widget test).
+          height: 150,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 14),
