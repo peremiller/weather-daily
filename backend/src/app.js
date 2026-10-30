@@ -1,3 +1,4 @@
+import {fileURLToPath} from 'node:url';
 import express from 'express';
 import { config, enabledChannels } from './config.js';
 import { broadcastDaily } from './broadcast.js';
@@ -19,6 +20,7 @@ import * as messenger from './bots/messenger.js';
 
 const app = express();
 app.use(express.json());
+app.use('/offline',express.static(fileURLToPath(new URL('../public/offline',import.meta.url))));
 
 let webhookSetupPromise = null;
 let webhookSetupStatus = config.telegram.enabled ? 'pending' : 'disabled';

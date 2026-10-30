@@ -1,0 +1,5 @@
+export const KEY='weather-daily.device.v1';
+export function readState(storage){try{const value=JSON.parse(storage.getItem(KEY)||'{}');return {reports:Array.isArray(value.reports)?value.reports:[],notes:Array.isArray(value.notes)?value.notes:[]};}catch{return {reports:[],notes:[]};}}
+export function saveState(storage,state){try{storage.setItem(KEY,JSON.stringify(state));return true;}catch{return false;}}
+export function addReport(state,payload,now=Date.now()){if(!payload||typeof payload.message!=='string'||!payload.weather||typeof payload.weather!=='object')throw Error('The forecast response is incomplete.');return {...state,reports:[{id:String(now),savedAt:now,message:payload.message,weather:payload.weather},...state.reports].slice(0,14)};}
+export async function fetchForecast(fetcher){const response=await fetcher('/weather',{credentials:'omit',cache:'no-store',headers:{Accept:'application/json'}});if(!response.ok)throw Error('The forecast feed could not be reached.');return response.json();}

@@ -12,3 +12,5 @@
 **/node_modules/
 backend/data/
 *.log
+backend/public/offline/
+graphify-out/

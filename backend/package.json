@@ -8,7 +8,9 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "send-now": "node src/sendNow.js",
-    "test": "node --test"
+    "test": "node --test",
+    "build": "node scripts/build-offline.mjs",
+    "test:offline": "node --test scripts/offline/offline.test.mjs scripts/offline/client.test.mjs"
   },
   "engines": {
     "node": ">=20"

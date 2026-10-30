@@ -5,5 +5,6 @@
       "path": "/cron/daily",
       "schedule": "0 23 * * *"
     }
-  ]
+  ],
+  "buildCommand": "npm run build"
 }
