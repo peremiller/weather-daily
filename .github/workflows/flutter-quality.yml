@@ -30,7 +30,9 @@ jobs:
       - name: Fetch locked Flutter dependencies
         run: flutter pub get
       - name: Analyze Dart sources
-        run: flutter analyze
+        # Flutter 3.50 marks the framework's own material.dart API deprecated.
+        # Keep analyzer errors/warnings fatal; report upstream informational notices.
+        run: flutter analyze --no-fatal-infos
       - name: Run Flutter widget and model tests
         run: flutter test
       - name: Build existing Flutter web target
