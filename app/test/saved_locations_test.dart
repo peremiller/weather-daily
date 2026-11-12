@@ -14,8 +14,12 @@ import 'package:weather_daily/services/weather_service.dart';
 
 /// Returns canned weather for whatever place is requested — no HTTP.
 class _FakeWeatherService extends WeatherService {
+  final String? failingPlace;
+  _FakeWeatherService({this.failingPlace});
+
   @override
   Future<Weather> getWeather(double lat, double lon, String placeName) async {
+    if (placeName == failingPlace) throw Exception('Forecast temporarily unavailable');
     return Weather(
       locationName: placeName,
       temperature: 26,
@@ -83,6 +87,40 @@ void main() {
 
     expect(find.text('Saved locations'), findsNothing); // sheet dismissed
     expect(find.text('Cebu City'), findsWidgets); // now the current place
+  });
+
+  testWidgets('failed city refresh cannot show prior city forecast as current',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'places_v2': jsonEncode([
+        {'lat': 14.6, 'lon': 121.0, 'name': 'Manila'},
+        {'lat': 10.3, 'lon': 123.9, 'name': 'Cebu City'},
+      ]),
+    });
+    final service = _FakeWeatherService(failingPlace: 'Cebu City');
+    await tester.pumpWidget(MaterialApp(home: HomeScreen(service: service)));
+    await tester.pumpAndSettle();
+    expect(find.text('Manila'), findsWidgets);
+
+    await tester.tap(find.byTooltip('Saved locations'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cebu City'));
+    await tester.pumpAndSettle();
+
+    // The old Manila forecast must not be presented as Cebu's live forecast.
+    expect(find.textContaining('Forecast temporarily unavailable'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.text('Manila'), findsNothing);
+
+    final prefs = await SharedPreferences.getInstance();
+    final saved = jsonDecode(prefs.getString('places_v2')!) as List<dynamic>;
+    expect(saved.length, 2); // No saved locations were deleted.
+    expect((saved.first as Map<String, dynamic>)['name'], 'Cebu City');
+
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.text('Manila'), findsNothing);
   });
 
   testWidgets('empty state invites adding a city', (tester) async {
