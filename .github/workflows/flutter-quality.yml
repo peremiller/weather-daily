@@ -1,0 +1,37 @@
+name: Flutter app quality
+
+on:
+  push:
+    paths:
+      - 'app/**'
+      - '.github/workflows/flutter-quality.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/flutter-quality.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flutter-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Fetch locked Flutter dependencies
+        run: flutter pub get
+      - name: Analyze Dart sources
+        run: flutter analyze
+      - name: Run Flutter widget and model tests
+        run: flutter test
+      - name: Build existing Flutter web target
+        run: flutter build web --release
