@@ -125,9 +125,11 @@ class _HomeScreenState extends State<HomeScreen> {
       final name = await _service.nameForCoords(pos.latitude, pos.longitude);
       await _selectPlace(pos.latitude, pos.longitude, name);
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        // GPS denial does not invalidate the forecast already on screen.
+        if (_weather == null) _error = e.toString();
       });
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -206,7 +208,9 @@ class _HomeScreenState extends State<HomeScreen> {
         child: CircularProgressIndicator(color: Colors.white),
       );
     }
-    if (_error != null && _weather == null) {
+    // A failed refresh must never display a previous place's forecast as current.
+    // Keep the last successful Weather in memory, but fail visibly until retry.
+    if (_error != null) {
       return _ErrorView(message: _error!, onRetry: _load);
     }
     final w = _weather!;
