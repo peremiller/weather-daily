@@ -37,6 +37,23 @@ test('health endpoint reports the runtime and storage backend', async () => {
   assert.equal(body.telegramWebhook, 'disabled');
 });
 
+test('Telegram webhook rejects a missing secret header', async () => {
+  const response = await fetch(`${baseUrl}/webhook/telegram`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ update_id: 1 }),
+  });
+  assert.equal(response.status, 401);
+});
+
+test('Telegram webhook fails closed without configured signing secret', async () => {
+  const { telegramWebhookAuthStatus } = await import('../src/app.js');
+  assert.equal(telegramWebhookAuthStatus('anything', ''), 503);
+  assert.equal(telegramWebhookAuthStatus(undefined, ''), 503);
+  assert.equal(telegramWebhookAuthStatus('incorrect', 'real-secret'), 401);
+  assert.equal(telegramWebhookAuthStatus('real-secret', 'real-secret'), 200);
+});
+
 test('Telegram webhook rejects a forged secret', async () => {
   const response = await fetch(`${baseUrl}/webhook/telegram`, {
     method: 'POST',
