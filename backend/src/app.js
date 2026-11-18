@@ -201,6 +201,13 @@ async function promptForLocation(chatId, intro) {
   await telegram.sendText(chatId, intro, LOCATION_KEYBOARD);
 }
 
+// Fail closed if the webhook secret is missing. Without a configured secret,
+// anyone on the internet could forge Telegram updates or change saved locations.
+export function telegramWebhookAuthStatus(presentedSecret, configuredSecret) {
+  if (!configuredSecret) return 503;
+  return presentedSecret === configuredSecret ? 200 : 401;
+}
+
 // ---- Telegram message handling ---------------------------------------------
 // Gives each user the weather for THEIR location. We only ask for the location
 // once; afterwards any message returns their local forecast, and /changelocation
@@ -368,13 +375,11 @@ export async function handleTelegramMessage(msg) {
 
 // Webhook alternative to polling (used only if you set a public webhook URL).
 app.post('/webhook/telegram', async (req, res) => {
-  if (
-    config.telegram.webhookSecret &&
-    req.get('x-telegram-bot-api-secret-token') !==
-      config.telegram.webhookSecret
-  ) {
-    return res.sendStatus(401);
-  }
+  const authStatus = telegramWebhookAuthStatus(
+    req.get('x-telegram-bot-api-secret-token'),
+    config.telegram.webhookSecret,
+  );
+  if (authStatus !== 200) return res.sendStatus(authStatus);
 
   const msg = req.body?.message || req.body?.edited_message;
   if (!msg?.chat?.id) return res.sendStatus(200);
