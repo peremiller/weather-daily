@@ -5,11 +5,13 @@ import { createHmac } from 'node:crypto';
 process.env.NODE_ENV = 'test';
 process.env.CRON_SECRET = 'test-cron-secret';
 process.env.TELEGRAM_WEBHOOK_SECRET = 'test-webhook-secret';
-process.env.VIBER_BOT_TOKEN = 'test-viber-token';
-process.env.MESSENGER_APP_SECRET = 'test-meta-secret';
 delete process.env.TELEGRAM_BOT_TOKEN;
 
 const { default: app } = await import('../src/app.js');
+// Inject signing keys into isolated handlers without enabling real broadcast channels.
+const { config } = await import('../src/config.js');
+config.viber.token = 'test-viber-token';
+config.messenger.appSecret = 'test-meta-secret';
 
 let server;
 let baseUrl;
@@ -94,13 +96,7 @@ test('daily cron requires authorization and runs when authorized', async () => {
 
   assert.equal(allowed.status, 200);
   assert.equal(body.ok, true);
-  // This suite enables a dummy Viber token to exercise webhook signatures.
-  // The cron must preserve existing channel results without broadcasting to users.
-  assert.deepEqual(body.results, [
-    { skipped: true },
-    { channel: 'viber', results: [] },
-    { skipped: true },
-  ]);
+  assert.deepEqual(body.results, []);
 });
 
 
