@@ -74,6 +74,8 @@ export const config = {
   messenger: {
     enabled: Boolean(process.env.MESSENGER_PAGE_TOKEN),
     pageToken: process.env.MESSENGER_PAGE_TOKEN || '',
+    // Meta signs webhook JSON bytes using the app secret, not the page token.
+    appSecret: process.env.MESSENGER_APP_SECRET || '',
     verifyToken: process.env.MESSENGER_VERIFY_TOKEN || 'weather_verify',
     // Comma-separated PSIDs (page-scoped user IDs) to message.
     recipientIds: (process.env.MESSENGER_RECIPIENT_IDS || '')
