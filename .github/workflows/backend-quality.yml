@@ -1,0 +1,36 @@
+name: Weather Daily backend security and regression
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-quality.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-quality.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run backend regression and security tests
+        run: npm test
+      - name: Build existing offline bundle
+        run: npm run build
