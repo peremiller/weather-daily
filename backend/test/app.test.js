@@ -94,7 +94,13 @@ test('daily cron requires authorization and runs when authorized', async () => {
 
   assert.equal(allowed.status, 200);
   assert.equal(body.ok, true);
-  assert.deepEqual(body.results, []);
+  // This suite enables a dummy Viber token to exercise webhook signatures.
+  // The cron must preserve existing channel results without broadcasting to users.
+  assert.deepEqual(body.results, [
+    { skipped: true },
+    { channel: 'viber', results: [] },
+    { skipped: true },
+  ]);
 });
 
 
