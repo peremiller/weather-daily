@@ -444,7 +444,7 @@ app.get('/webhook/messenger', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && token === config.messenger.verifyToken) {
+  if (mode === 'subscribe' && config.messenger.verifyToken && token === config.messenger.verifyToken) {
     return res.status(200).send(challenge);
   }
   return res.sendStatus(403);
