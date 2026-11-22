@@ -100,6 +100,25 @@ test('daily cron requires authorization and runs when authorized', async () => {
 });
 
 
+test('Messenger handshake fails closed with no token or an incorrect token', async () => {
+  const previous = config.messenger.verifyToken;
+  const url = `${baseUrl}/webhook/messenger?hub.mode=subscribe&hub.challenge=challenge-123&hub.verify_token=unique-test-token`;
+  try {
+    config.messenger.verifyToken = '';
+    assert.equal((await fetch(url)).status, 403);
+    config.messenger.verifyToken = 'different-test-token';
+    assert.equal((await fetch(url)).status, 403);
+    config.messenger.verifyToken = 'unique-test-token';
+    const accepted = await fetch(url);
+    assert.equal(accepted.status, 200);
+    assert.equal(await accepted.text(), 'challenge-123');
+    const missing = await fetch(`${baseUrl}/webhook/messenger?hub.mode=subscribe&hub.challenge=challenge-123`);
+    assert.equal(missing.status, 403);
+  } finally {
+    config.messenger.verifyToken = previous;
+  }
+});
+
 test('Viber webhook authenticates the original bytes before accepting callback', async () => {
   const raw = JSON.stringify({ event: 'webhook' });
   const url = `${baseUrl}/webhook/viber`;
