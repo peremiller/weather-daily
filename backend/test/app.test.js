@@ -42,6 +42,21 @@ test('health endpoint reports the runtime and storage backend', async () => {
   assert.equal(body.telegramWebhook, 'disabled');
 });
 
+test('Telegram registration skips unsigned webhook without a remote API call', async () => {
+  const { registerWebhook } = await import('../src/bots/telegram.js');
+  const oldEnabled = config.telegram.enabled;
+  const oldSecret = config.telegram.webhookSecret;
+  try {
+    config.telegram.enabled = true;
+    config.telegram.webhookSecret = '';
+    const result = await registerWebhook('https://example.invalid');
+    assert.deepEqual(result, { skipped: true, reason: 'secret_missing' });
+  } finally {
+    config.telegram.enabled = oldEnabled;
+    config.telegram.webhookSecret = oldSecret;
+  }
+});
+
 test('Telegram webhook rejects a missing secret header', async () => {
   const response = await fetch(`${baseUrl}/webhook/telegram`, {
     method: 'POST',
