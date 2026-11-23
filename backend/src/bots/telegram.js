@@ -158,11 +158,13 @@ export async function registerCommands() {
 /**
  * Point Telegram at the production HTTPS webhook. Telegram webhooks and
  * getUpdates polling are mutually exclusive, so this replaces long polling on
- * Vercel. The optional secret lets the app reject forged webhook requests.
+ * Vercel. A verification secret is required to accept webhook callbacks.
  */
 export async function registerWebhook(publicUrl = config.publicUrl) {
   if (!config.telegram.enabled) return { skipped: true, reason: 'token_missing' };
   if (!publicUrl) return { skipped: true, reason: 'public_url_missing' };
+  // Do not replace an existing webhook with one that our endpoint cannot verify.
+  if (!config.telegram.webhookSecret) return { skipped: true, reason: 'secret_missing' };
 
   const baseUrl = publicUrl.replace(/\/+$/, '');
   const payload = {

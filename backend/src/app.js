@@ -1,4 +1,5 @@
 import {fileURLToPath} from 'node:url';
+import {createHmac, timingSafeEqual} from 'node:crypto';
 import express from 'express';
 import { config, enabledChannels } from './config.js';
 import { broadcastDaily } from './broadcast.js';
@@ -19,7 +20,12 @@ import * as viber from './bots/viber.js';
 import * as messenger from './bots/messenger.js';
 
 const app = express();
-app.use(express.json());
+// Preserve the exact signed JSON bytes for provider callbacks only.
+app.use(express.json({verify(req, _res, raw) {
+  if (req.path === '/webhook/viber' || req.path === '/webhook/messenger') {
+    req.rawWebhookBody = Buffer.from(raw);
+  }
+}}));
 app.use('/offline',express.static(fileURLToPath(new URL('../public/offline',import.meta.url))));
 
 let webhookSetupPromise = null;
@@ -34,6 +40,11 @@ async function ensureProductionTelegramWebhook() {
     return;
   }
   if (webhookSetupPromise) return webhookSetupPromise;
+  // Never register an unsigned webhook or report incomplete setup as ready.
+  if (!config.telegram.webhookSecret) {
+    webhookSetupStatus = 'error';
+    return;
+  }
 
   webhookSetupPromise = Promise.all([
     telegram.registerWebhook(),
@@ -199,6 +210,13 @@ async function sendForecastFor(chatId, loc) {
 /** Prompt the user to share a (new) location. */
 async function promptForLocation(chatId, intro) {
   await telegram.sendText(chatId, intro, LOCATION_KEYBOARD);
+}
+
+// Fail closed if the webhook secret is missing. Without a configured secret,
+// anyone on the internet could forge Telegram updates or change saved locations.
+export function telegramWebhookAuthStatus(presentedSecret, configuredSecret) {
+  if (!configuredSecret) return 503;
+  return presentedSecret === configuredSecret ? 200 : 401;
 }
 
 // ---- Telegram message handling ---------------------------------------------
@@ -368,13 +386,11 @@ export async function handleTelegramMessage(msg) {
 
 // Webhook alternative to polling (used only if you set a public webhook URL).
 app.post('/webhook/telegram', async (req, res) => {
-  if (
-    config.telegram.webhookSecret &&
-    req.get('x-telegram-bot-api-secret-token') !==
-      config.telegram.webhookSecret
-  ) {
-    return res.sendStatus(401);
-  }
+  const authStatus = telegramWebhookAuthStatus(
+    req.get('x-telegram-bot-api-secret-token'),
+    config.telegram.webhookSecret,
+  );
+  if (authStatus !== 200) return res.sendStatus(authStatus);
 
   const msg = req.body?.message || req.body?.edited_message;
   if (!msg?.chat?.id) return res.sendStatus(200);
@@ -382,8 +398,25 @@ app.post('/webhook/telegram', async (req, res) => {
   return res.sendStatus(200);
 });
 
+// Provider callback signatures are HMAC-SHA256 over the original request bytes.
+// Never accept unsigned/unconfigured callbacks, which can modify subscribers.
+export function providerWebhookAuthStatus(rawBody, signatureHeader, key, prefix = '') {
+  if (!key) return 503;
+  if (!Buffer.isBuffer(rawBody)) return 401;
+  if (typeof signatureHeader !== 'string' || !signatureHeader.startsWith(prefix)) return 401;
+  const hex = signatureHeader.slice(prefix.length);
+  if (!/^[a-f0-9]{64}$/i.test(hex)) return 401;
+  const actual = Buffer.from(hex, 'hex');
+  const expected = createHmac('sha256', key).update(rawBody).digest();
+  return timingSafeEqual(actual, expected) ? 200 : 401;
+}
+
 // ---- Viber webhook ---------------------------------------------------------
 app.post('/webhook/viber', async (req, res) => {
+  const authStatus = providerWebhookAuthStatus(
+    req.rawWebhookBody, req.get('x-viber-content-signature'), config.viber.token,
+  );
+  if (authStatus !== 200) return res.sendStatus(authStatus);
   res.sendStatus(200);
   const event = req.body;
   try {
@@ -416,13 +449,17 @@ app.get('/webhook/messenger', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && token === config.messenger.verifyToken) {
+  if (mode === 'subscribe' && config.messenger.verifyToken && token === config.messenger.verifyToken) {
     return res.status(200).send(challenge);
   }
   return res.sendStatus(403);
 });
 
 app.post('/webhook/messenger', async (req, res) => {
+  const authStatus = providerWebhookAuthStatus(
+    req.rawWebhookBody, req.get('x-hub-signature-256'), config.messenger.appSecret, 'sha256=',
+  );
+  if (authStatus !== 200) return res.sendStatus(authStatus);
   res.sendStatus(200);
   const body = req.body;
   if (body.object !== 'page') return;
