@@ -40,6 +40,11 @@ async function ensureProductionTelegramWebhook() {
     return;
   }
   if (webhookSetupPromise) return webhookSetupPromise;
+  // Never register an unsigned webhook or report incomplete setup as ready.
+  if (!config.telegram.webhookSecret) {
+    webhookSetupStatus = 'error';
+    return;
+  }
 
   webhookSetupPromise = Promise.all([
     telegram.registerWebhook(),
